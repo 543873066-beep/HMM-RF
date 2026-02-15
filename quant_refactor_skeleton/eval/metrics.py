@@ -1,6 +1,4 @@
-"""Skeleton: quant_refactor.eval.metrics
+from quant_refactor_skeleton.rf.backtest import compute_daily_sharpe
+from quant_refactor_skeleton.rf.dataset import evaluate_regression
 
-TODO: implement metrics migrated from `quant_refactor/eval/metrics.py`.
-"""
-
-__all__ = []
+__all__ = ["compute_daily_sharpe", "evaluate_regression"]
