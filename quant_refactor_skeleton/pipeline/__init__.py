@@ -1,4 +1,5 @@
-"""Pipeline modules (skeleton)
-"""
+"""Pipeline modules (skeleton)."""
 
-__all__ = []
+from . import engine_compat, msp_pipeline, rf_pipeline
+
+__all__ = ["engine_compat", "msp_pipeline", "rf_pipeline"]
