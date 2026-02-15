@@ -87,7 +87,7 @@ def fit_hmm_train_infer(
     X_all = feat_ready[feature_cols].values.astype(float)
 
     # -------- Fit mask (historical only) --------
-    from quant_refactor_skeleton.features.feature_builder import pick_fit_mask_by_date
+    from quant_refactor_skeleton.hmm.train_split import pick_fit_mask_by_date
 
     fit_mask = pick_fit_mask_by_date(
         feat_ready.index,
