@@ -1,5 +1,22 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 *.pyd
-.ipynb_checkpoints/
+*.pyo
+*.pkl
+*.joblib
+
+# venv
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+.vscode/
+
+# data & outputs (按你实际输出目录再补充)
+outputs*/
+data/
+*.csv
+*.parquet
+*.log
