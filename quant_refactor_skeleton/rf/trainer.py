@@ -169,3 +169,13 @@ def run_rf_pipeline_strict_last_month(super_df: pd.DataFrame, cfg: "Config"):
             export_live_pack(out_dir, cfg, trade_df_snapshot=trade_snapshot)
     except:
         pass
+
+
+def run_rf_stage_placeholder(argv=None) -> int:
+    from quant_refactor_skeleton.rf.backtest import run_backtest_placeholder
+
+    if argv and any(a in ("-h", "--help") for a in argv):
+        print("usage: qrs-new-rf [--help]")
+        print("placeholder: rf trainer stage")
+        return 0
+    return int(run_backtest_placeholder(argv=argv))

@@ -220,3 +220,11 @@ def compute_daily_sharpe(strategy_ret: pd.Series, times: pd.Series) -> float:
         return float(daily.mean() / daily.std(ddof=1) * np.sqrt(252.0))
     except:
         return float("nan")
+
+
+def run_backtest_placeholder(argv=None) -> int:
+    if argv and any(a in ("-h", "--help") for a in argv):
+        print("usage: qrs-new-backtest [--help]")
+        print("placeholder: backtest stage")
+        return 0
+    return 0

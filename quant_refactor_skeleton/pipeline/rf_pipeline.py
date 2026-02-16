@@ -8,7 +8,11 @@ from quant_refactor_skeleton.rf import trainer as rf_trainer
 
 
 def run_rf_pipeline(super_df, cfg):
-    raise NotImplementedError("assembly scaffold only")
+    return int(rf_trainer.run_rf_stage_placeholder(argv=[]))
 
 
-__all__ = ["rf_backtest", "rf_dataset", "rf_gates", "rf_trainer", "run_rf_pipeline"]
+def run_rf_pipeline_placeholder(argv=None) -> int:
+    return int(rf_trainer.run_rf_stage_placeholder(argv=argv))
+
+
+__all__ = ["rf_backtest", "rf_dataset", "rf_gates", "rf_trainer", "run_rf_pipeline", "run_rf_pipeline_placeholder"]
