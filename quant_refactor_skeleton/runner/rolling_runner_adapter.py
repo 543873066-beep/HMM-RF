@@ -30,14 +30,22 @@ def run_legacy_rolling_runner(argv: Optional[list[str]] = None) -> int:
     return _invoke_legacy_main("rolling_runner", argv=argv)
 
 
+def run_new_rolling_runner(argv: Optional[list[str]] = None) -> int:
+    if argv and any(a in ("-h", "--help") for a in argv):
+        print("usage: qrs-new-rolling [--help]")
+        print("placeholder rolling route (new)")
+        return 0
+    print("[QRS:new] rolling placeholder route active")
+    return 0
+
+
 def run_refactor_rolling(argv: Optional[list[str]] = None) -> int:
     route = os.getenv("QRS_ROLLING_ROUTE", "legacy").strip().lower()
     if route in {"legacy", "", "0", "false"}:
         return run_legacy_rolling_runner(argv=argv)
     if route in {"new", "refactor", "1", "true"}:
-        # Hook only. Keep behavior unchanged until refactor rolling pipeline is wired.
-        return run_legacy_rolling_runner(argv=argv)
+        return run_new_rolling_runner(argv=argv)
     return run_legacy_rolling_runner(argv=argv)
 
 
-__all__ = ["run_legacy_rolling_runner", "run_refactor_rolling"]
+__all__ = ["run_legacy_rolling_runner", "run_new_rolling_runner", "run_refactor_rolling"]

@@ -46,9 +46,14 @@ def safe_mean_combo(df: pd.DataFrame, cols: List[str], mode: str) -> pd.Series:
     return df[cols].mean(axis=1, skipna=True)
 
 
+def regression_smoke_placeholder() -> int:
+    return 0
+
+
 __all__ = [
     "make_flat_curve_from_input",
     "read_equity_curve",
+    "regression_smoke_placeholder",
     "rescale_equity_to_1",
     "safe_mean_combo",
 ]
