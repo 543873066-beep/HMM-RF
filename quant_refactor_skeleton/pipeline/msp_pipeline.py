@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import os
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional, Sequence
 
 # assembly-only module imports for migration wiring
@@ -39,6 +39,28 @@ def _normalize_argv(argv: Optional[Sequence[str]]) -> list[str]:
     return list(argv or [])
 
 
+def _build_cfg(args: argparse.Namespace) -> SimpleNamespace:
+    cfg = SimpleNamespace()
+    cfg.tf_5m = "5min"
+    cfg.min_count_5m = 1
+    cfg.min_count_30m = 6
+    cfg.ma_fast = 20
+    cfg.ma_slow = 60
+    cfg.vol_short = 20
+    cfg.vol_long = 60
+    cfg.rsi_n = 14
+    cfg.atr_n = 14
+    cfg.adx_n = 14
+    cfg.input_tf_minutes = int(args.input_tf_minutes) if args.input_tf_minutes else 5
+    return cfg
+
+
+def _save_with_time_index(df, out_csv: Path) -> None:
+    tmp = df.copy()
+    tmp = tmp.reset_index().rename(columns={tmp.index.name or "index": "time"})
+    tmp.to_csv(out_csv, index=False, encoding="utf-8-sig")
+
+
 def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     parser = _build_parser()
     args, _ = parser.parse_known_args(_normalize_argv(argv))
@@ -56,12 +78,37 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     out_dir = Path(str(args.out_dir or "outputs"))
     out_dir.mkdir(parents=True, exist_ok=True)
     run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+    cfg = _build_cfg(args)
 
     print(f"[QRS:new] pipeline=msp input_csv={input_path}")
     print(f"[QRS:new] pipeline=msp out_dir={out_dir.resolve()}")
     print(f"[QRS:new] pipeline=msp run_id={run_id}")
-    print("[QRS:new] skeleton reached: downstream data/features/hmm/rf stages are not wired in N1")
-    return 3
+    print("[QRS:new] stage=data.loaders")
+    df_raw = data_loaders.load_ohlcv_csv(str(input_path))
+    df_5m = data_loaders.normalize_input_5m(df_raw, cfg)
+    df_30m = data_resample.resample_ohlcv(df_5m, "30min", cfg)
+    df_1d = data_resample.resample_ohlcv(df_5m, "1D", cfg)
+
+    print("[QRS:new] stage=features.make_features")
+    feat_5m = feature_builder_mod.make_features(df_5m, cfg, "5m")
+    feat_30m = feature_builder_mod.make_features(df_30m, cfg, "30m")
+    feat_1d = feature_builder_mod.make_features(df_1d, cfg, "1d")
+    if feat_5m.empty:
+        print("[QRS:new] error: feature table is empty after make_features")
+        return 4
+
+    _save_with_time_index(feat_5m, out_dir / "features_5m.csv")
+    _save_with_time_index(feat_30m, out_dir / "features_30m.csv")
+    _save_with_time_index(feat_1d, out_dir / "features_1d.csv")
+
+    core_cols = ["log_ret_1", "atr_14", "momentum_10"]
+    missing = [c for c in core_cols if c not in feat_5m.columns]
+    if missing:
+        print(f"[QRS:new] error: missing core feature columns: {missing}")
+        return 5
+    print(f"[QRS:new] features_5m rows={len(feat_5m)} cols={len(feat_5m.columns)}")
+    print("[QRS:new] N2 pipeline finished")
+    return 0
 
 
 __all__ = [
