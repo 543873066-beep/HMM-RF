@@ -24,3 +24,11 @@ def pick_fit_mask_by_date(
             return np.ones(len(idx), dtype=bool)
         last_date = idx.max().normalize()
         return (idx < last_date).astype(bool)
+
+
+def train_split_placeholder(argv=None) -> int:
+    if argv and any(a in ("-h", "--help") for a in argv):
+        print("usage: qrs-new-train-split [--help]")
+        print("placeholder: train-split stage")
+        return 0
+    return 0

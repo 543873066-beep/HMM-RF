@@ -213,3 +213,11 @@ def run_super_hmm_from_overlay(df_overlay: pd.DataFrame, cfg: "Config"):
     ).mean()
 
     return df2, best_k, float(best_ll)
+
+
+def run_super_stage_placeholder(argv=None) -> int:
+    if argv and any(a in ("-h", "--help") for a in argv):
+        print("usage: qrs-new-super [--help]")
+        print("placeholder: super-state stage")
+        return 0
+    return 0
