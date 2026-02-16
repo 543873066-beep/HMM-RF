@@ -106,8 +106,30 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     if missing:
         print(f"[QRS:new] error: missing core feature columns: {missing}")
         return 5
+
+    print("[QRS:new] stage=overlay.super_state")
+    overlay_super_df = overlay_builder_mod.build_overlay_superstate_minimal(df_5m, feat_5m, cfg=None)
+    if overlay_super_df.empty:
+        print("[QRS:new] error: overlay/super_state table is empty")
+        return 6
+    required_super_cols = [
+        "overlay_id",
+        "overlay_tuple",
+        "super_state",
+        "posterior_maxp",
+        "stability_score",
+        "avg_run_local",
+        "switch_rate_local",
+    ]
+    missing_super = [c for c in required_super_cols if c not in overlay_super_df.columns]
+    if missing_super:
+        print(f"[QRS:new] error: missing super_state columns: {missing_super}")
+        return 7
+    _save_with_time_index(overlay_super_df, out_dir / "super_state_overlay_30m.csv")
+
     print(f"[QRS:new] features_5m rows={len(feat_5m)} cols={len(feat_5m.columns)}")
-    print("[QRS:new] N2 pipeline finished")
+    print(f"[QRS:new] super_state rows={len(overlay_super_df)} cols={len(overlay_super_df.columns)}")
+    print("[QRS:new] N3 pipeline finished")
     return 0
 
 
