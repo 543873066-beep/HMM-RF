@@ -129,7 +129,14 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
 
     print(f"[QRS:new] features_5m rows={len(feat_5m)} cols={len(feat_5m.columns)}")
     print(f"[QRS:new] super_state rows={len(overlay_super_df)} cols={len(overlay_super_df.columns)}")
-    print("[QRS:new] N3 pipeline finished")
+    print("[QRS:new] stage=rf.alignment_fallback_legacy")
+    from quant_refactor_skeleton.pipeline.engine_compat import run_legacy_engine_main
+
+    rc_legacy = int(run_legacy_engine_main(argv=list(_normalize_argv(argv))))
+    if rc_legacy != 0:
+        print(f"[QRS:new] error: legacy fallback returned {rc_legacy}")
+        return rc_legacy
+    print("[QRS:new] N4 pipeline finished")
     return 0
 
 
