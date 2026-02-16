@@ -31,26 +31,9 @@ def run_legacy_engine_main(argv: Optional[list[str]] = None) -> int:
 
 
 def run_new_engine_main(argv: Optional[list[str]] = None) -> int:
-    from quant_refactor_skeleton.hmm.model import run_hmm_stage_placeholder
-    from quant_refactor_skeleton.hmm.train_split import train_split_placeholder
-    from quant_refactor_skeleton.super_state.super_hmm import run_super_stage_placeholder
+    from quant_refactor_skeleton.pipeline.msp_pipeline import run_msp_pipeline
 
-    if argv and any(a in ("-h", "--help") for a in argv):
-        print("usage: qrs-new-engine [--help]")
-        print("placeholder route via quant_refactor_skeleton")
-        return 0
-
-    rc = int(train_split_placeholder(argv=argv))
-    if rc != 0:
-        return rc
-    rc = int(run_hmm_stage_placeholder(argv=argv))
-    if rc != 0:
-        return rc
-    rc = int(run_super_stage_placeholder(argv=argv))
-    if rc != 0:
-        return rc
-    print("[QRS:new] placeholder pipeline completed")
-    return 0
+    return int(run_msp_pipeline(argv=argv))
 
 
 def run_pipeline(mode: str, argv: Optional[list[str]] = None) -> int:
