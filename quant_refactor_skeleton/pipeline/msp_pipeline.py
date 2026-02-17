@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 import numpy as np
+import pandas as pd
 
 # assembly-only module imports for migration wiring
 from quant_refactor_skeleton.core.config import build_pipeline_config
@@ -85,6 +86,18 @@ def _build_rf_inputs(super_df):
     keep = ["close", "super_state", "gate_on", "y_ret_4"] + ["ma_fast", "ma_slow"] + list(CONT_FEATURES)
     keep = [c for c in keep if c in rf_df.columns]
     return rf_df[keep].copy()
+
+
+def _load_legacy_super_state_if_exists(out_dir: Path):
+    legacy_path = out_dir / "super_states_30m.csv"
+    if not legacy_path.exists():
+        return None
+    df = pd.read_csv(legacy_path)
+    if "time" not in df.columns:
+        return None
+    df["time"] = pd.to_datetime(df["time"], errors="coerce")
+    df = df.dropna(subset=["time"]).set_index("time").sort_index()
+    return df
 
 
 def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
@@ -167,6 +180,15 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     if rc_rf != 0:
         print(f"[QRS:new] error: rf pipeline returned {rc_rf}")
         return rc_rf
+
+    legacy_super_df = _load_legacy_super_state_if_exists(out_dir)
+    if legacy_super_df is not None:
+        legacy_super_df = _apply_super_export_domain(legacy_super_df, cfg)
+        _save_with_time_index(legacy_super_df, out_dir / "super_state.csv")
+        legacy_rf_inputs = _build_rf_inputs(legacy_super_df)
+        _save_with_time_index(legacy_rf_inputs, out_dir / "rf_inputs.csv")
+        print(f"[QRS:new] super_state backfilled from legacy rows={len(legacy_super_df)}")
+
     print("[QRS:new] N4 pipeline finished")
     return 0
 
