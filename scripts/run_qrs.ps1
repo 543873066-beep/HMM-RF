@@ -102,8 +102,17 @@ try {
             if ($Route -eq "legacy") {
                 $rc = Invoke-Python @("rolling_runner.py")
             } else {
+                Ensure-InputCsv $InputCsv
                 $env:QRS_ROLLING_ROUTE = "new"
-                $rc = Invoke-Python @("scripts\run_rolling_compat.py", "--route", "new")
+                $foldDir = Join-Path $outDir "fold_001"
+                New-Item -ItemType Directory -Force -Path $foldDir | Out-Null
+                $rc = Invoke-Python @(
+                    "scripts\run_rolling_compat.py",
+                    "--route", "new",
+                    "--",
+                    "--input_csv", $InputCsv,
+                    "--out_dir", $foldDir
+                )
             }
             if ($rc -ne 0) { exit $rc }
             Write-Host ("[QRS] mode=rolling route={0} out_root={1}" -f $Route, (Resolve-Path $runRoot).Path)
