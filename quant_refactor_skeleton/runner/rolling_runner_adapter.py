@@ -6,6 +6,17 @@ import sys
 from typing import Optional, Sequence
 
 
+def _force_utf8_stdio() -> None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _invoke_legacy_main(module_name: str, argv: Optional[Sequence[str]] = None) -> int:
     mod = importlib.import_module(module_name)
     main = getattr(mod, "main", None)
@@ -31,12 +42,12 @@ def run_legacy_rolling_runner(argv: Optional[list[str]] = None) -> int:
 
 
 def run_new_rolling_runner(argv: Optional[list[str]] = None) -> int:
-    if argv and any(a in ("-h", "--help") for a in argv):
-        print("usage: qrs-new-rolling [--help]")
-        print("placeholder rolling route (new)")
-        return 0
-    print("[QRS:new] rolling placeholder route active")
-    return 0
+    from quant_refactor_skeleton.pipeline.engine_compat import run_pipeline
+
+    _force_utf8_stdio()
+    os.environ["QRS_PIPELINE_ROUTE"] = "new"
+    print("[QRS:new] rolling route delegates to new engine pipeline")
+    return int(run_pipeline("engine", argv=argv or []))
 
 
 def run_refactor_rolling(argv: Optional[list[str]] = None) -> int:
