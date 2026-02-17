@@ -3,12 +3,12 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Optional, Sequence
 
 import numpy as np
 
 # assembly-only module imports for migration wiring
+from quant_refactor_skeleton.core.config import build_pipeline_config
 from quant_refactor_skeleton.data import loaders as data_loaders
 from quant_refactor_skeleton.data import resample as data_resample
 from quant_refactor_skeleton.features import feature_builder as feature_builder_mod
@@ -41,20 +41,13 @@ def _normalize_argv(argv: Optional[Sequence[str]]) -> list[str]:
     return list(argv or [])
 
 
-def _build_cfg(args: argparse.Namespace) -> SimpleNamespace:
-    cfg = SimpleNamespace()
-    cfg.tf_5m = "5min"
-    cfg.min_count_5m = 1
-    cfg.min_count_30m = 6
-    cfg.ma_fast = 20
-    cfg.ma_slow = 60
-    cfg.vol_short = 20
-    cfg.vol_long = 60
-    cfg.rsi_n = 14
-    cfg.atr_n = 14
-    cfg.adx_n = 14
-    cfg.input_tf_minutes = int(args.input_tf_minutes) if args.input_tf_minutes else 5
-    return cfg
+def _build_cfg(args: argparse.Namespace):
+    return build_pipeline_config(
+        input_csv=args.input_csv,
+        out_dir=args.out_dir,
+        run_id=args.run_id,
+        input_tf_minutes=args.input_tf_minutes,
+    )
 
 
 def _save_with_time_index(df, out_csv: Path) -> None:

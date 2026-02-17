@@ -1,6 +1,43 @@
-"""Skeleton: quant_refactor.core.config
+from __future__ import annotations
 
-TODO: implement configuration helpers migrated from `quant_refactor/core/config.py`.
-"""
+from dataclasses import dataclass
+from typing import Optional
 
-__all__ = []
+
+@dataclass
+class PipelineConfig:
+    input_csv: str = r"data/sh000852_5m.csv"
+    out_dir: str = r"outputs"
+    run_id: Optional[str] = None
+    input_tf_minutes: int = 5
+    tf_5m: str = "5min"
+    min_count_5m: int = 1
+    min_count_30m: int = 6
+    ma_fast: int = 20
+    ma_slow: int = 60
+    vol_short: int = 20
+    vol_long: int = 60
+    rsi_n: int = 14
+    atr_n: int = 14
+    adx_n: int = 14
+
+
+def build_pipeline_config(
+    input_csv: Optional[str] = None,
+    out_dir: Optional[str] = None,
+    run_id: Optional[str] = None,
+    input_tf_minutes: Optional[int] = None,
+) -> PipelineConfig:
+    cfg = PipelineConfig()
+    if input_csv:
+        cfg.input_csv = str(input_csv)
+    if out_dir:
+        cfg.out_dir = str(out_dir)
+    if run_id:
+        cfg.run_id = str(run_id)
+    if input_tf_minutes is not None:
+        cfg.input_tf_minutes = int(input_tf_minutes)
+    return cfg
+
+
+__all__ = ["PipelineConfig", "build_pipeline_config"]
