@@ -56,6 +56,19 @@ def _save_with_time_index(df, out_csv: Path) -> None:
     tmp.to_csv(out_csv, index=False, encoding="utf-8-sig")
 
 
+def _apply_super_export_domain(df, cfg):
+    out = df.copy()
+    start = getattr(cfg, "super_state_export_start_date", None)
+    end = getattr(cfg, "super_state_export_end_date", None)
+    if start:
+        start_dt = np.datetime64(start)
+        out = out[out.index >= start_dt]
+    if end:
+        end_dt = np.datetime64(end)
+        out = out[out.index <= end_dt]
+    return out
+
+
 def _build_rf_inputs(super_df):
     from quant_refactor_skeleton.rf.dataset import CONT_FEATURES, safe_log_return
 
@@ -138,6 +151,7 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     if missing_super:
         print(f"[QRS:new] error: missing super_state columns: {missing_super}")
         return 7
+    overlay_super_df = _apply_super_export_domain(overlay_super_df, cfg)
     _save_with_time_index(overlay_super_df, out_dir / "super_state_overlay_30m.csv")
     _save_with_time_index(overlay_super_df, out_dir / "super_state.csv")
     rf_inputs = _build_rf_inputs(overlay_super_df)
