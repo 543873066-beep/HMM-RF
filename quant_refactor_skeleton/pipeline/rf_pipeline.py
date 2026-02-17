@@ -7,8 +7,14 @@ from quant_refactor_skeleton.rf import gates as rf_gates
 from quant_refactor_skeleton.rf import trainer as rf_trainer
 
 
-def run_rf_pipeline(super_df, cfg):
-    return int(rf_trainer.run_rf_stage_placeholder(argv=[]))
+def run_rf_pipeline(super_df, cfg, argv=None):
+    """RF pipeline glue for new-route execution.
+
+    Current alignment mode keeps equity identical by routing to legacy engine.
+    """
+    from quant_refactor_skeleton.pipeline.engine_compat import run_legacy_engine_main
+
+    return int(run_legacy_engine_main(argv=list(argv or [])))
 
 
 def run_rf_pipeline_placeholder(argv=None) -> int:
