@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional, Sequence
 
+import numpy as np
+
 # assembly-only module imports for migration wiring
 from quant_refactor_skeleton.data import loaders as data_loaders
 from quant_refactor_skeleton.data import resample as data_resample
@@ -59,6 +61,24 @@ def _save_with_time_index(df, out_csv: Path) -> None:
     tmp = df.copy()
     tmp = tmp.reset_index().rename(columns={tmp.index.name or "index": "time"})
     tmp.to_csv(out_csv, index=False, encoding="utf-8-sig")
+
+
+def _build_rf_inputs(super_df):
+    from quant_refactor_skeleton.rf.dataset import CONT_FEATURES, safe_log_return
+
+    rf_df = super_df.copy()
+    for col in CONT_FEATURES:
+        if col not in rf_df.columns:
+            rf_df[col] = np.nan
+    for col in ["ma_fast", "ma_slow"]:
+        if col not in rf_df.columns:
+            rf_df[col] = np.nan
+    rf_df["y_ret_4"] = safe_log_return(rf_df["close"].shift(-4), rf_df["close"])
+    if "gate_on" not in rf_df.columns:
+        rf_df["gate_on"] = False
+    keep = ["close", "super_state", "gate_on", "y_ret_4"] + ["ma_fast", "ma_slow"] + list(CONT_FEATURES)
+    keep = [c for c in keep if c in rf_df.columns]
+    return rf_df[keep].copy()
 
 
 def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
@@ -126,9 +146,13 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         print(f"[QRS:new] error: missing super_state columns: {missing_super}")
         return 7
     _save_with_time_index(overlay_super_df, out_dir / "super_state_overlay_30m.csv")
+    _save_with_time_index(overlay_super_df, out_dir / "super_state.csv")
+    rf_inputs = _build_rf_inputs(overlay_super_df)
+    _save_with_time_index(rf_inputs, out_dir / "rf_inputs.csv")
 
     print(f"[QRS:new] features_5m rows={len(feat_5m)} cols={len(feat_5m.columns)}")
     print(f"[QRS:new] super_state rows={len(overlay_super_df)} cols={len(overlay_super_df.columns)}")
+    print(f"[QRS:new] rf_inputs rows={len(rf_inputs)} cols={len(rf_inputs.columns)}")
     print("[QRS:new] stage=rf.alignment_fallback_legacy")
     from quant_refactor_skeleton.pipeline.engine_compat import run_legacy_engine_main
 
