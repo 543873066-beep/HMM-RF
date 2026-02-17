@@ -63,6 +63,14 @@ function Get-BestEquityCsv([string]$RootDir) {
     return $best
 }
 
+function Get-LatestCompareRun([string]$RootDir) {
+    if (-not (Test-Path -LiteralPath $RootDir)) { return $null }
+    return Get-ChildItem -LiteralPath $RootDir -Directory |
+        Where-Object { (Test-Path (Join-Path $_.FullName "legacy")) -and (Test-Path (Join-Path $_.FullName "new")) } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+}
+
 if ($Help) {
     Show-Usage
     exit 0
@@ -155,15 +163,16 @@ try {
         }
         "stage-diff" {
             Ensure-InputCsv $InputCsv
-            if (-not (Test-Path -LiteralPath $OutRoot)) {
-                Write-Error ("OutRoot not found for stage-diff: {0}. Run compare first to generate legacy/new artifacts." -f $OutRoot)
-            }
-            $latest = Get-ChildItem -LiteralPath $OutRoot -Directory |
-                Where-Object { (Test-Path (Join-Path $_.FullName "legacy")) -and (Test-Path (Join-Path $_.FullName "new")) } |
-                Sort-Object LastWriteTime -Descending |
-                Select-Object -First 1
+            $latest = Get-LatestCompareRun $OutRoot
             if ($null -eq $latest) {
-                Write-Error ("No timestamp run found under OutRoot: {0}. Run compare first." -f $OutRoot)
+                Write-Host ("[QRS] no compare run under {0}, bootstrap compare first..." -f $OutRoot)
+                $compareRc = Invoke-Python @("msp_engine_ewma_exhaustion_opt_atr_momo.py", "--input_csv", $InputCsv, "--out_dir", (Join-Path (Join-Path $OutRoot $timestamp) "legacy"))
+                if ($compareRc -ne 0) { Write-Error ("Bootstrap legacy run failed: {0}" -f $compareRc) }
+                $env:QRS_PIPELINE_ROUTE = "new"
+                $newRc = Invoke-Python @("scripts\run_engine_compat.py", "--route", "new", "--", "--input_csv", $InputCsv, "--out_dir", (Join-Path (Join-Path $OutRoot $timestamp) "new"))
+                if ($newRc -ne 0) { Write-Error ("Bootstrap new run failed: {0}" -f $newRc) }
+                $latest = Get-LatestCompareRun $OutRoot
+                if ($null -eq $latest) { Write-Error ("No valid compare run found after bootstrap under {0}" -f $OutRoot) }
             }
             $legacyDir = Join-Path $latest.FullName "legacy"
             $newDir = Join-Path $latest.FullName "new"

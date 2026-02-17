@@ -100,6 +100,15 @@ def _load_legacy_super_state_if_exists(out_dir: Path):
     return df
 
 
+def _backfill_super_state_labels(new_df: pd.DataFrame, legacy_df: pd.DataFrame) -> pd.DataFrame:
+    out = new_df.copy()
+    if "super_state" not in legacy_df.columns:
+        return out
+    common = out.index.intersection(legacy_df.index)
+    out.loc[common, "super_state"] = pd.to_numeric(legacy_df.loc[common, "super_state"], errors="coerce")
+    return out
+
+
 def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     parser = _build_parser()
     args, _ = parser.parse_known_args(_normalize_argv(argv))
@@ -184,10 +193,11 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     legacy_super_df = _load_legacy_super_state_if_exists(out_dir)
     if legacy_super_df is not None:
         legacy_super_df = _apply_super_export_domain(legacy_super_df, cfg)
-        _save_with_time_index(legacy_super_df, out_dir / "super_state.csv")
-        legacy_rf_inputs = _build_rf_inputs(legacy_super_df)
-        _save_with_time_index(legacy_rf_inputs, out_dir / "rf_inputs.csv")
-        print(f"[QRS:new] super_state backfilled from legacy rows={len(legacy_super_df)}")
+        aligned_super_df = _backfill_super_state_labels(overlay_super_df, legacy_super_df)
+        _save_with_time_index(aligned_super_df, out_dir / "super_state.csv")
+        aligned_rf_inputs = _build_rf_inputs(aligned_super_df)
+        _save_with_time_index(aligned_rf_inputs, out_dir / "rf_inputs.csv")
+        print(f"[QRS:new] super_state labels backfilled from legacy rows={len(legacy_super_df)}")
 
     print("[QRS:new] N4 pipeline finished")
     return 0
