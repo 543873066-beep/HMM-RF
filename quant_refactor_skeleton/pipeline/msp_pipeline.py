@@ -74,6 +74,17 @@ def _build_rf_inputs(super_df):
     from quant_refactor_skeleton.rf.dataset import CONT_FEATURES, safe_log_return
 
     rf_df = super_df.copy()
+    # Explicitly derive rf_inputs only from the passed dataframe.
+    for col in [
+        "super_state",
+        "posterior_maxp",
+        "posterior_entropy",
+        "stability_score",
+        "avg_run_local",
+        "switch_rate_local",
+    ]:
+        if col in rf_df.columns:
+            rf_df[col] = pd.to_numeric(rf_df[col], errors="coerce")
     for col in CONT_FEATURES:
         if col not in rf_df.columns:
             rf_df[col] = np.nan
