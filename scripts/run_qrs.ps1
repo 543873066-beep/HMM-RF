@@ -1,20 +1,17 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("engine", "rolling", "compare")]
+    [ValidateSet("engine", "rolling", "compare", "stage-diff")]
     [string]$Mode,
 
     [ValidateSet("legacy", "new")]
     [string]$Route = "legacy",
 
     [string]$InputCsv = "data\sh000852_5m.csv",
-
     [string]$OutRoot = "outputs_rebuild\qrs_runs",
-
     [double]$TolAbs = 1e-10,
     [double]$TolRel = 1e-10,
     [int]$TopN = 20,
-
     [switch]$Help
 )
 
@@ -22,60 +19,43 @@ $ErrorActionPreference = "Stop"
 
 function Show-Usage {
     Write-Host "Usage:"
-    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode engine  -Route legacy|new [-InputCsv <csv>] [-OutRoot <dir>]"
+    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode engine -Route legacy|new [-InputCsv <csv>] [-OutRoot <dir>]"
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode rolling -Route legacy|new [-InputCsv <csv>] [-OutRoot <dir>]"
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode compare [-InputCsv <csv>] [-OutRoot <dir>] [-TolAbs 1e-10] [-TolRel 1e-10] [-TopN 20]"
+    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode stage-diff [-InputCsv <csv>] [-OutRoot <dir>]"
 }
 
 function Ensure-InputCsv([string]$CsvPath) {
     if (-not (Test-Path -LiteralPath $CsvPath)) {
-        Write-Error ("Input CSV not found: {0}`n建议：`n1) 把 CSV 放到 data\ 下（字段至少含 time/open/high/low/close/volume）`n2) 或使用 -InputCsv 指定路径" -f $CsvPath)
+        Write-Error ("Input CSV not found: {0}`nSuggestions:`n1) Put CSV under data\ (required columns: time/open/high/low/close/volume)`n2) Or pass -InputCsv with a full path" -f $CsvPath)
     }
 }
 
 function Invoke-Python {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Args
-    )
+    param([Parameter(Mandatory = $true)][string[]]$Args)
     & python @Args | Out-Host
     return $LASTEXITCODE
 }
 
 function Get-BestEquityCsv([string]$RootDir) {
-    if (-not (Test-Path -LiteralPath $RootDir)) {
-        return $null
-    }
+    if (-not (Test-Path -LiteralPath $RootDir)) { return $null }
     $best = $null
     $bestScore = -1
     $bestRows = -1
-
     Get-ChildItem -LiteralPath $RootDir -Recurse -File -Filter *.csv | ForEach-Object {
-        $file = $_
-        $name = $file.Name.ToLowerInvariant()
         $score = 0
+        $name = $_.Name.ToLowerInvariant()
         if ($name -match "equity") { $score += 4 }
         if ($name -match "curve") { $score += 2 }
-
         $header = ""
-        try {
-            $header = (Get-Content -LiteralPath $file.FullName -TotalCount 1)
-        } catch {
-            $header = ""
-        }
-        $headerLower = $header.ToLowerInvariant()
-        if ($headerLower -match "equity|eq|nav") { $score += 3 }
-        if ($headerLower -match "time") { $score += 1 }
-
+        try { $header = (Get-Content -LiteralPath $_.FullName -TotalCount 1) } catch {}
+        $h = $header.ToLowerInvariant()
+        if ($h -match "equity|eq|nav") { $score += 3 }
+        if ($h -match "time") { $score += 1 }
         $rows = 0
-        try {
-            $rows = [Math]::Max(0, ((Get-Content -LiteralPath $file.FullName | Measure-Object -Line).Lines - 1))
-        } catch {
-            $rows = 0
-        }
-
+        try { $rows = [Math]::Max(0, ((Get-Content -LiteralPath $_.FullName | Measure-Object -Line).Lines - 1)) } catch {}
         if (($score -gt $bestScore) -or (($score -eq $bestScore) -and ($rows -gt $bestRows))) {
-            $best = $file.FullName
+            $best = $_.FullName
             $bestScore = $score
             $bestRows = $rows
         }
@@ -89,8 +69,11 @@ if ($Help) {
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$runRoot = Join-Path $OutRoot $timestamp
-New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
+$runRoot = $null
+if ($Mode -ne "stage-diff") {
+    $runRoot = Join-Path $OutRoot $timestamp
+    New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
+}
 
 $oldUtf8 = $env:PYTHONUTF8
 $oldPipeRoute = $env:QRS_PIPELINE_ROUTE
@@ -103,7 +86,6 @@ try {
             Ensure-InputCsv $InputCsv
             $outDir = Join-Path $runRoot $Route
             New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-
             if ($Route -eq "legacy") {
                 $rc = Invoke-Python @("msp_engine_ewma_exhaustion_opt_atr_momo.py", "--input_csv", $InputCsv, "--out_dir", $outDir)
             } else {
@@ -114,7 +96,6 @@ try {
             Write-Host ("[QRS] mode=engine route={0} out_dir={1}" -f $Route, (Resolve-Path $outDir).Path)
             exit 0
         }
-
         "rolling" {
             $outDir = Join-Path $runRoot $Route
             New-Item -ItemType Directory -Force -Path $outDir | Out-Null
@@ -128,7 +109,6 @@ try {
             Write-Host ("[QRS] mode=rolling route={0} out_root={1}" -f $Route, (Resolve-Path $runRoot).Path)
             exit 0
         }
-
         "compare" {
             Ensure-InputCsv $InputCsv
             $legacyDir = Join-Path $runRoot "legacy"
@@ -158,19 +138,35 @@ try {
                 "--topn", "$TopN",
                 "--out", $diffPath
             )
-
-            if ($rcCmp -eq 0) {
-                Write-Host "[QRS] compare=PASS"
-            } else {
-                Write-Host "[QRS] compare=FAIL"
-            }
+            if ($rcCmp -eq 0) { Write-Host "[QRS] compare=PASS" } else { Write-Host "[QRS] compare=FAIL" }
             Write-Host ("[QRS] legacy_equity={0}" -f $oldEq)
             Write-Host ("[QRS] new_equity={0}" -f $newEq)
             Write-Host ("[QRS] diff_csv={0}" -f $diffPath)
             exit $rcCmp
         }
+        "stage-diff" {
+            Ensure-InputCsv $InputCsv
+            if (-not (Test-Path -LiteralPath $OutRoot)) {
+                Write-Error ("OutRoot not found for stage-diff: {0}. Run compare first to generate legacy/new artifacts." -f $OutRoot)
+            }
+            $latest = Get-ChildItem -LiteralPath $OutRoot -Directory |
+                Where-Object { (Test-Path (Join-Path $_.FullName "legacy")) -and (Test-Path (Join-Path $_.FullName "new")) } |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+            if ($null -eq $latest) {
+                Write-Error ("No timestamp run found under OutRoot: {0}. Run compare first." -f $OutRoot)
+            }
+            $legacyDir = Join-Path $latest.FullName "legacy"
+            $newDir = Join-Path $latest.FullName "new"
+            if ((-not (Test-Path -LiteralPath $legacyDir)) -or (-not (Test-Path -LiteralPath $newDir))) {
+                Write-Error ("Stage artifacts missing. legacy='{0}', new='{1}'" -f $legacyDir, $newDir)
+            }
+            $rcStage = Invoke-Python @("tools\stage_diff.py", "--legacy-dir", $legacyDir, "--new-dir", $newDir, "--input-csv", $InputCsv)
+            exit $rcStage
+        }
     }
-} finally {
+}
+finally {
     if ($null -ne $oldUtf8) { $env:PYTHONUTF8 = $oldUtf8 } else { Remove-Item Env:\PYTHONUTF8 -ErrorAction SilentlyContinue }
     if ($null -ne $oldPipeRoute) { $env:QRS_PIPELINE_ROUTE = $oldPipeRoute } else { Remove-Item Env:\QRS_PIPELINE_ROUTE -ErrorAction SilentlyContinue }
     if ($null -ne $oldRollRoute) { $env:QRS_ROLLING_ROUTE = $oldRollRoute } else { Remove-Item Env:\QRS_ROLLING_ROUTE -ErrorAction SilentlyContinue }
