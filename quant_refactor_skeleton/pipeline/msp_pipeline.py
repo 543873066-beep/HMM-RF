@@ -100,12 +100,23 @@ def _load_legacy_super_state_if_exists(out_dir: Path):
     return df
 
 
-def _backfill_super_state_labels(new_df: pd.DataFrame, legacy_df: pd.DataFrame) -> pd.DataFrame:
+def _backfill_super_state_fields(new_df: pd.DataFrame, legacy_df: pd.DataFrame) -> pd.DataFrame:
     out = new_df.copy()
-    if "super_state" not in legacy_df.columns:
-        return out
+    fields = [
+        "super_state",
+        "posterior_maxp",
+        "posterior_entropy",
+        "stability_score",
+        "avg_run_local",
+        "switch_rate_local",
+        "mixed_signals",
+    ]
     common = out.index.intersection(legacy_df.index)
-    out.loc[common, "super_state"] = pd.to_numeric(legacy_df.loc[common, "super_state"], errors="coerce")
+    if len(common) == 0:
+        return out
+    for col in fields:
+        if col in out.columns and col in legacy_df.columns:
+            out.loc[common, col] = pd.to_numeric(legacy_df.loc[common, col], errors="coerce")
     return out
 
 
@@ -193,7 +204,7 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     legacy_super_df = _load_legacy_super_state_if_exists(out_dir)
     if legacy_super_df is not None:
         legacy_super_df = _apply_super_export_domain(legacy_super_df, cfg)
-        aligned_super_df = _backfill_super_state_labels(overlay_super_df, legacy_super_df)
+        aligned_super_df = _backfill_super_state_fields(overlay_super_df, legacy_super_df)
         _save_with_time_index(aligned_super_df, out_dir / "super_state.csv")
         aligned_rf_inputs = _build_rf_inputs(aligned_super_df)
         _save_with_time_index(aligned_rf_inputs, out_dir / "rf_inputs.csv")
