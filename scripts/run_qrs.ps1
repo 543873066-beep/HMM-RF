@@ -92,6 +92,16 @@ function Get-BestEquityCsv([string]$RootDir) {
     return $best
 }
 
+function Get-RollingEquityCsvPaths([string]$RootDir) {
+    if (-not (Test-Path -LiteralPath $RootDir)) { return @() }
+    $patterns = @("backtest_equity_curve.csv")
+    $matches = @()
+    foreach ($p in $patterns) {
+        $matches += Get-ChildItem -LiteralPath $RootDir -Recurse -File -Filter $p -ErrorAction SilentlyContinue
+    }
+    return $matches | Sort-Object FullName -Unique
+}
+
 function Get-LatestCompareRun([string]$RootDir) {
     if (-not (Test-Path -LiteralPath $RootDir)) { return $null }
     return Get-ChildItem -LiteralPath $RootDir -Directory |
@@ -160,7 +170,17 @@ try {
                 }
             }
             if ($rc -ne 0) { exit $rc }
-            Write-Host ("[QRS] mode=rolling route={0} out_root={1}" -f $Route, (Resolve-Path $runRoot).Path)
+            $resolvedOutRoot = (Resolve-Path $runRoot).Path
+            Write-Host ("[QRS] mode=rolling route={0} out_root={1}" -f $Route, $resolvedOutRoot)
+            $eqFiles = Get-RollingEquityCsvPaths $runRoot
+            if ($eqFiles.Count -gt 0) {
+                Write-Host "[QRS] rolling equity files:"
+                foreach ($f in $eqFiles) {
+                    Write-Host ("[QRS] equity={0}" -f $f.FullName)
+                }
+            } else {
+                Write-Host "[QRS] rolling equity files: none found"
+            }
             exit 0
         }
         "compare" {
