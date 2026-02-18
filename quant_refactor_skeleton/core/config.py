@@ -23,6 +23,7 @@ class PipelineConfig:
     super_state_export_start_date: Optional[str] = "2022-01-13 13:30:00"
     super_state_export_end_date: Optional[str] = None
     enable_legacy_backfill: bool = False
+    disable_legacy_equity_fallback_in_rolling: bool = False
 
 
 def build_pipeline_config(
@@ -33,6 +34,7 @@ def build_pipeline_config(
     super_state_export_start_date: Optional[str] = None,
     super_state_export_end_date: Optional[str] = None,
     enable_legacy_backfill: Optional[bool] = None,
+    disable_legacy_equity_fallback_in_rolling: Optional[bool] = None,
 ) -> PipelineConfig:
     cfg = PipelineConfig()
     if input_csv:
@@ -49,6 +51,8 @@ def build_pipeline_config(
         cfg.super_state_export_end_date = str(super_state_export_end_date)
     if enable_legacy_backfill is not None:
         cfg.enable_legacy_backfill = bool(enable_legacy_backfill)
+    if disable_legacy_equity_fallback_in_rolling is not None:
+        cfg.disable_legacy_equity_fallback_in_rolling = bool(disable_legacy_equity_fallback_in_rolling)
     return cfg
 
 

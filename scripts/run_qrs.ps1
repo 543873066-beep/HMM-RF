@@ -10,6 +10,7 @@ param(
     [string]$InputCsv = "data\sh000852_5m.csv",
     [string]$OutRoot = "outputs_rebuild\qrs_runs",
     [Nullable[int]]$LegacyBackfill = $null,
+    [switch]$DisableLegacyEquityFallback,
     [switch]$SkipStageDiff,
     [double]$TolAbs = 1e-10,
     [double]$TolRel = 1e-10,
@@ -22,7 +23,7 @@ $ErrorActionPreference = "Stop"
 function Show-Usage {
     Write-Host "Usage:"
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode engine -Route legacy|new [-InputCsv <csv>] [-OutRoot <dir>]"
-    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode rolling -Route legacy|new [-InputCsv <csv>] [-OutRoot <dir>]"
+    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode rolling -Route legacy|new [-InputCsv <csv>] [-OutRoot <dir>] [-DisableLegacyEquityFallback]"
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode compare [-InputCsv <csv>] [-OutRoot <dir>] [-TolAbs 1e-10] [-TolRel 1e-10] [-TopN 20] [-SkipStageDiff]"
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode stage-diff [-InputCsv <csv>] [-OutRoot <dir>]"
     Write-Host ""
@@ -58,7 +59,12 @@ function Resolve-LegacyBackfillValue {
 function New-RouteArgs([string]$CsvPath, [string]$OutDir) {
     $backfill = Resolve-LegacyBackfillValue
     $bf = if ($backfill) { "1" } else { "0" }
-    return @("--", "--input_csv", $CsvPath, "--out_dir", $OutDir, "--enable_legacy_backfill", $bf)
+    $disableFallback = if ($DisableLegacyEquityFallback) { "1" } else { "0" }
+    return @(
+        "--", "--input_csv", $CsvPath, "--out_dir", $OutDir,
+        "--enable_legacy_backfill", $bf,
+        "--disable_legacy_equity_fallback_in_rolling", $disableFallback
+    )
 }
 
 function Build-NewRouteArgs([string]$CsvPath, [string]$OutDir, [hashtable]$ExtraArgs) {
