@@ -25,6 +25,10 @@ function Show-Usage {
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode rolling -Route legacy|new [-InputCsv <csv>] [-OutRoot <dir>]"
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode compare [-InputCsv <csv>] [-OutRoot <dir>] [-TolAbs 1e-10] [-TolRel 1e-10] [-TopN 20] [-SkipStageDiff]"
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode stage-diff [-InputCsv <csv>] [-OutRoot <dir>]"
+    Write-Host ""
+    Write-Host "Rolling compare example:"
+    Write-Host "  python tools\rolling_compare.py --legacy-root outputs_rebuild\n10_2_rolling_legacy --new-root outputs_rebuild\n10_2_rolling_new --tol-abs 1e-10 --tol-rel 1e-10 --topn 20"
+    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\one_click_rolling_compare.ps1"
 }
 
 function Ensure-InputCsv([string]$CsvPath) {
