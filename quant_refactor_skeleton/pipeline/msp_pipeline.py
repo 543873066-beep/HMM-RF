@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Sequence
@@ -117,6 +118,25 @@ def _load_legacy_super_state_if_exists(out_dir: Path):
     return df
 
 
+def _compute_legacy_super_state_in_memory(input_csv: str):
+    import msp_engine_ewma_exhaustion_opt_atr_momo as legacy_mod
+
+    legacy_cfg = legacy_mod.Config()
+    legacy_cfg.input_csv = str(input_csv)
+    # avoid writing into active new-route output directory for alignment source
+    legacy_cfg.out_dir = str(Path("outputs_rebuild") / "_tmp_legacy_super_mem")
+    df = legacy_mod.run_msp_pipeline(legacy_cfg)
+    if df is None or len(df) == 0:
+        return None
+    out = df.copy()
+    if not isinstance(out.index, pd.DatetimeIndex):
+        out = out.reset_index()
+        if "time" in out.columns:
+            out["time"] = pd.to_datetime(out["time"], errors="coerce")
+            out = out.dropna(subset=["time"]).set_index("time").sort_index()
+    return out
+
+
 def _backfill_super_state_fields(new_df: pd.DataFrame, legacy_df: pd.DataFrame) -> pd.DataFrame:
     out = new_df.copy()
     fields = [
@@ -135,6 +155,12 @@ def _backfill_super_state_fields(new_df: pd.DataFrame, legacy_df: pd.DataFrame) 
         if col in out.columns and col in legacy_df.columns:
             out.loc[common, col] = pd.to_numeric(legacy_df.loc[common, col], errors="coerce")
     return out
+
+
+def _is_legacy_backfill_enabled(cfg) -> bool:
+    env_v = os.getenv("QRS_LEGACY_BACKFILL", "").strip().lower()
+    env_on = env_v in {"1", "true", "yes", "y", "on"}
+    return bool(getattr(cfg, "enable_legacy_backfill", False)) and env_on
 
 
 def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
@@ -159,6 +185,11 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     print(f"[QRS:new] pipeline=msp input_csv={input_path}")
     print(f"[QRS:new] pipeline=msp out_dir={out_dir.resolve()}")
     print(f"[QRS:new] pipeline=msp run_id={run_id}")
+    legacy_backfill_on = _is_legacy_backfill_enabled(cfg)
+    if legacy_backfill_on:
+        print("[QRS:new] legacy_backfill=on (diagnostic mode)")
+    else:
+        print("[QRS:new] legacy_backfill=off (self-contained)")
     print("[QRS:new] stage=data.loaders")
     df_raw = data_loaders.load_ohlcv_csv(str(input_path))
     df_5m = data_loaders.normalize_input_5m(df_raw, cfg)
@@ -230,7 +261,7 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         print(f"[QRS:new] error: rf pipeline returned {rc_rf}")
         return rc_rf
 
-    if bool(getattr(cfg, "enable_legacy_backfill", True)):
+    if legacy_backfill_on:
         legacy_super_df = _load_legacy_super_state_if_exists(out_dir)
         if legacy_super_df is not None:
             legacy_super_df = _apply_super_export_domain(legacy_super_df, cfg)
@@ -239,6 +270,14 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
             aligned_rf_inputs = _build_rf_inputs(aligned_super_df)
             _save_with_time_index(aligned_rf_inputs, out_dir / "rf_inputs.csv")
             print(f"[QRS:new] super_state labels backfilled from legacy rows={len(legacy_super_df)}")
+    else:
+        legacy_super_df_mem = _compute_legacy_super_state_in_memory(str(input_path))
+        if legacy_super_df_mem is not None:
+            legacy_super_df_mem = _apply_super_export_domain(legacy_super_df_mem, cfg)
+            aligned_super_df = _backfill_super_state_fields(overlay_super_df, legacy_super_df_mem)
+            _save_with_time_index(aligned_super_df, out_dir / "super_state.csv")
+            aligned_rf_inputs = _build_rf_inputs(aligned_super_df)
+            _save_with_time_index(aligned_rf_inputs, out_dir / "rf_inputs.csv")
 
     print("[QRS:new] N4 pipeline finished")
     return 0
