@@ -221,3 +221,38 @@ def run_super_stage_placeholder(argv=None) -> int:
         print("placeholder: super-state stage")
         return 0
     return 0
+
+
+def recompute_runlife_metrics(
+    df: pd.DataFrame,
+    avg_run_window: int = 200,
+    ewma_alpha_run: float = 0.15,
+    min_hist_runs: int = 3,
+    use_ewma_prior: bool = True,
+):
+    from quant_refactor_skeleton.super_state.lifecycle import (
+        compute_avg_run_local_expected_life_online_ewma,
+        compute_run_len_so_far,
+    )
+
+    out = df.copy()
+    if "super_state" not in out.columns:
+        return out
+    s_arr = pd.to_numeric(out["super_state"], errors="coerce").fillna(-1).astype(int).values
+    avg_arr, _ = compute_avg_run_local_expected_life_online_ewma(
+        s_arr,
+        window=int(avg_run_window),
+        ewma_alpha=float(ewma_alpha_run),
+        min_hist_runs=int(min_hist_runs),
+        use_ewma_prior=bool(use_ewma_prior),
+    )
+    out["avg_run_local"] = avg_arr.astype(float)
+    out["run_len_so_far"] = compute_run_len_so_far(s_arr)
+    out["exhaustion_ratio"] = out["run_len_so_far"] / np.maximum(
+        pd.to_numeric(out["avg_run_local"], errors="coerce").astype(float).values,
+        1e-6,
+    )
+    out["switch_rate_local"] = (pd.Series(s_arr, index=out.index) != pd.Series(s_arr, index=out.index).shift(1)).astype(
+        float
+    ).rolling(50, min_periods=10).mean()
+    return out

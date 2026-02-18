@@ -202,6 +202,14 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         print(f"[QRS:new] error: missing super_state columns: {missing_super}")
         return 7
     overlay_super_df = _apply_super_export_domain(overlay_super_df, cfg)
+    if not bool(getattr(cfg, "enable_legacy_backfill", True)):
+        overlay_super_df = super_hmm_mod.recompute_runlife_metrics(
+            overlay_super_df,
+            avg_run_window=200,
+            ewma_alpha_run=0.15,
+            min_hist_runs=3,
+            use_ewma_prior=True,
+        )
     _save_with_time_index(overlay_super_df, out_dir / "super_state_overlay_30m.csv")
     _save_with_time_index(overlay_super_df, out_dir / "super_state.csv")
     rf_inputs = _build_rf_inputs(overlay_super_df)
