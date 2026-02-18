@@ -10,6 +10,7 @@ param(
     [string]$InputCsv = "data\sh000852_5m.csv",
     [string]$OutRoot = "outputs_rebuild\qrs_runs",
     [Nullable[int]]$LegacyBackfill = $null,
+    [switch]$SkipStageDiff,
     [double]$TolAbs = 1e-10,
     [double]$TolRel = 1e-10,
     [int]$TopN = 20,
@@ -22,7 +23,7 @@ function Show-Usage {
     Write-Host "Usage:"
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode engine -Route legacy|new [-InputCsv <csv>] [-OutRoot <dir>]"
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode rolling -Route legacy|new [-InputCsv <csv>] [-OutRoot <dir>]"
-    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode compare [-InputCsv <csv>] [-OutRoot <dir>] [-TolAbs 1e-10] [-TolRel 1e-10] [-TopN 20]"
+    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode compare [-InputCsv <csv>] [-OutRoot <dir>] [-TolAbs 1e-10] [-TolRel 1e-10] [-TopN 20] [-SkipStageDiff]"
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode stage-diff [-InputCsv <csv>] [-OutRoot <dir>]"
 }
 
@@ -44,7 +45,7 @@ function Resolve-LegacyBackfillValue {
     }
     $envVal = $env:QRS_LEGACY_BACKFILL
     if ([string]::IsNullOrWhiteSpace($envVal)) {
-        return $true
+        return $false
     }
     $v = $envVal.Trim().ToLowerInvariant()
     return ($v -in @("1", "true", "yes", "y", "on"))
@@ -54,6 +55,15 @@ function New-RouteArgs([string]$CsvPath, [string]$OutDir) {
     $backfill = Resolve-LegacyBackfillValue
     $bf = if ($backfill) { "1" } else { "0" }
     return @("--", "--input_csv", $CsvPath, "--out_dir", $OutDir, "--enable_legacy_backfill", $bf)
+}
+
+function Apply-LegacyBackfillEnv {
+    $backfill = Resolve-LegacyBackfillValue
+    if ($backfill) {
+        $env:QRS_LEGACY_BACKFILL = "1"
+    } else {
+        $env:QRS_LEGACY_BACKFILL = "0"
+    }
 }
 
 function Get-BestEquityCsv([string]$RootDir) {
@@ -113,9 +123,12 @@ try {
             Ensure-InputCsv $InputCsv
             $outDir = Join-Path $runRoot $Route
             New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+            $bfText = if (Resolve-LegacyBackfillValue) { "on" } else { "off" }
+            Write-Host ("[QRS] route={0} legacy_backfill={1}" -f $Route, $bfText)
             if ($Route -eq "legacy") {
                 $rc = Invoke-Python @("msp_engine_ewma_exhaustion_opt_atr_momo.py", "--input_csv", $InputCsv, "--out_dir", $outDir)
             } else {
+                Apply-LegacyBackfillEnv
                 $env:QRS_PIPELINE_ROUTE = "new"
                 $rc = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (New-RouteArgs $InputCsv $outDir))
             }
@@ -126,10 +139,13 @@ try {
         "rolling" {
             $outDir = Join-Path $runRoot $Route
             New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+            $bfText = if (Resolve-LegacyBackfillValue) { "on" } else { "off" }
+            Write-Host ("[QRS] route={0} legacy_backfill={1}" -f $Route, $bfText)
             if ($Route -eq "legacy") {
                 $rc = Invoke-Python @("rolling_runner.py")
             } else {
                 Ensure-InputCsv $InputCsv
+                Apply-LegacyBackfillEnv
                 $env:QRS_ROLLING_ROUTE = "new"
                 $foldDir = Join-Path $outDir "fold_001"
                 New-Item -ItemType Directory -Force -Path $foldDir | Out-Null
@@ -149,6 +165,8 @@ try {
         }
         "compare" {
             Ensure-InputCsv $InputCsv
+            $bfText = if (Resolve-LegacyBackfillValue) { "on" } else { "off" }
+            Write-Host ("[QRS] route=new legacy_backfill={0}" -f $bfText)
             $legacyDir = Join-Path $runRoot "legacy"
             $newDir = Join-Path $runRoot "new"
             New-Item -ItemType Directory -Force -Path $legacyDir, $newDir | Out-Null
@@ -157,6 +175,7 @@ try {
             if ($rcLegacy -ne 0) { Write-Error ("Legacy run failed with code {0}" -f $rcLegacy) }
 
             $env:QRS_PIPELINE_ROUTE = "new"
+            Apply-LegacyBackfillEnv
             $rcNew = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (New-RouteArgs $InputCsv $newDir))
             if ($rcNew -ne 0) { Write-Error ("New run failed with code {0}" -f $rcNew) }
 
@@ -180,6 +199,11 @@ try {
             Write-Host ("[QRS] legacy_equity={0}" -f $oldEq)
             Write-Host ("[QRS] new_equity={0}" -f $newEq)
             Write-Host ("[QRS] diff_csv={0}" -f $diffPath)
+            if (($rcCmp -eq 0) -and (-not $SkipStageDiff)) {
+                Write-Host "[QRS] compare passed, running stage-diff..."
+                $rcStageAfter = Invoke-Python @("tools\stage_diff.py", "--legacy-dir", $legacyDir, "--new-dir", $newDir, "--input-csv", $InputCsv)
+                if ($rcStageAfter -ne 0) { exit $rcStageAfter }
+            }
             exit $rcCmp
         }
         "stage-diff" {
@@ -189,6 +213,7 @@ try {
                 Write-Host ("[QRS] no compare run under {0}, bootstrap compare first..." -f $OutRoot)
                 $compareRc = Invoke-Python @("msp_engine_ewma_exhaustion_opt_atr_momo.py", "--input_csv", $InputCsv, "--out_dir", (Join-Path (Join-Path $OutRoot $timestamp) "legacy"))
                 if ($compareRc -ne 0) { Write-Error ("Bootstrap legacy run failed: {0}" -f $compareRc) }
+                Apply-LegacyBackfillEnv
                 $env:QRS_PIPELINE_ROUTE = "new"
                 $newRc = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (New-RouteArgs $InputCsv (Join-Path (Join-Path $OutRoot $timestamp) "new")))
                 if ($newRc -ne 0) { Write-Error ("Bootstrap new run failed: {0}" -f $newRc) }
