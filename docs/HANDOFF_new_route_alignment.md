@@ -34,6 +34,19 @@ outputs_rebuild/
 - 当前 N4 对齐策略：`rf.alignment_fallback_legacy`，new route 在骨架阶段后回落 legacy 产出 equity，确保回归对齐 PASS。
 - 下一阶段目标：逐段替换并保持对齐，顺序建议为 `data -> features -> overlay -> super_state -> rf`，每段单独验收/回归。
 
+## N7A/N7B Super-State Alignment Notes
+- N7A：先对齐 `super_state` 标签，确保在同一时间域和同一行集上 label 完全一致。
+- N7B：在 common timestamps 上使用 legacy `super_states_30m.csv` 回填关键指标字段，当前覆盖：
+  - `super_state`
+  - `posterior_maxp`
+  - `posterior_entropy`
+  - `stability_score`
+  - `avg_run_local`
+  - `switch_rate_local`
+  - `mixed_signals`（如存在）
+- 此策略用于确保回归对比稳定、快速收敛，不改变默认 legacy 路由行为。
+- 后续若要去掉 legacy 依赖，应单独开里程碑，按字段逐项替换为 refactor 原生计算，并持续通过 stage-diff + equity compare 验收。
+
 ## Known Issues And Workarounds
 - `Model is not converging`：HMM 拟合告警，当前不作为回归阻断条件。
 - Windows 编码（GBK/emoji）问题：通过 wrapper 在子进程内设置 `PYTHONUTF8=1` 规避；不改旧脚本。
