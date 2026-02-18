@@ -152,7 +152,7 @@ def run_compare(
         last_bad_time = str(bad_df["time"].iloc[-1]) if len(bad_df) > 0 else None
         diff_csv = diff_dir / f"{fold}_diff.csv"
         diff_df.to_csv(diff_csv, index=False)
-        fold_ok = rows_bad == 0
+        fold_ok = (rows_bad == 0) and (rows > 0)
         if not fold_ok:
             overall_pass = False
         results.append(
