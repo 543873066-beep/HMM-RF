@@ -102,6 +102,19 @@ function Get-RollingEquityCsvPaths([string]$RootDir) {
     return $matches | Sort-Object FullName -Unique
 }
 
+function Sync-LegacyRollingEquity([string]$TargetRoot) {
+    $legacyCandidates = Get-ChildItem -LiteralPath "outputs_roll\runs" -Recurse -File -Filter "backtest_equity_curve.csv" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    if ($legacyCandidates.Count -eq 0) { return @() }
+
+    $latest = $legacyCandidates[0].FullName
+    $dst = Join-Path $TargetRoot "fold_001\rf_h4_per_state_dynamic_selected\backtest_equity_curve.csv"
+    $dstDir = Split-Path -Path $dst -Parent
+    New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
+    Copy-Item -LiteralPath $latest -Destination $dst -Force
+    return @($dst)
+}
+
 function Get-LatestCompareRun([string]$RootDir) {
     if (-not (Test-Path -LiteralPath $RootDir)) { return $null }
     return Get-ChildItem -LiteralPath $RootDir -Directory |
@@ -153,21 +166,21 @@ try {
             Write-Host ("[QRS] route={0} legacy_backfill={1}" -f $Route, $bfText)
             if ($Route -eq "legacy") {
                 $rc = Invoke-Python @("rolling_runner.py")
+                if ($rc -eq 0) {
+                    $synced = Sync-LegacyRollingEquity $outDir
+                    if ($synced.Count -gt 0) {
+                        Write-Host "[QRS] synced legacy rolling equity:"
+                        foreach ($p in $synced) { Write-Host ("[QRS] equity={0}" -f (Resolve-Path $p).Path) }
+                    }
+                }
             } else {
                 Ensure-InputCsv $InputCsv
                 Apply-LegacyBackfillEnv
                 $env:QRS_ROLLING_ROUTE = "new"
                 $foldDir = Join-Path $outDir "fold_001"
                 New-Item -ItemType Directory -Force -Path $foldDir | Out-Null
-                $rc = Invoke-Python @(
-                    "scripts\run_rolling_compat.py",
-                    "--route", "new",
-                    "--"
-                )
-                if ($rc -eq 0) {
-                    $env:QRS_PIPELINE_ROUTE = "new"
-                    $rc = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (New-RouteArgs $InputCsv $foldDir))
-                }
+                $env:QRS_PIPELINE_ROUTE = "new"
+                $rc = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (New-RouteArgs $InputCsv $foldDir))
             }
             if ($rc -ne 0) { exit $rc }
             $resolvedOutRoot = (Resolve-Path $runRoot).Path
