@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict
 
 import pandas as pd
 
@@ -28,6 +28,8 @@ class FoldResult:
     max_abs_diff: float
     max_rel_diff: float
     rows_over_threshold: int
+    first_bad_time: str | None
+    last_bad_time: str | None
     pass_fold: bool
     diff_csv: str
 
@@ -38,6 +40,9 @@ def _find_latest_run_root(root: Path) -> Path:
     children = [p for p in root.iterdir() if p.is_dir()]
     if not children:
         return root
+    with_curves = [p for p in children if any(p.rglob("backtest_equity_curve.csv"))]
+    if with_curves:
+        return sorted(with_curves, key=lambda p: p.name, reverse=True)[0]
     stamped = sorted(children, key=lambda p: p.name, reverse=True)
     return stamped[0]
 
@@ -88,6 +93,13 @@ def _compute_metrics(diff_df: pd.DataFrame, tol_abs: float, tol_rel: float) -> t
     return rows, max_abs, max_rel, int(len(bad))
 
 
+def _bad_rows(diff_df: pd.DataFrame, tol_abs: float, tol_rel: float) -> pd.DataFrame:
+    valid = diff_df.dropna(subset=["abs_diff"]).copy()
+    abs_bad = valid["abs_diff"] > float(tol_abs)
+    rel_bad = valid["rel_diff"] > float(tol_rel)
+    return valid[abs_bad.fillna(False) | rel_bad.fillna(False)].sort_values("time")
+
+
 def _top_rows(diff_df: pd.DataFrame, topn: int) -> list[dict]:
     cols = ["time", "equity_old", "equity_new", "abs_diff", "rel_diff"]
     bad = diff_df.dropna(subset=["abs_diff"]).sort_values("abs_diff", ascending=False).head(int(max(1, topn)))
@@ -135,6 +147,9 @@ def run_compare(
         new_csv = new_curves[fold]
         diff_df = compare_curves(read_curve(str(legacy_csv)), read_curve(str(new_csv)))
         rows, max_abs, max_rel, rows_bad = _compute_metrics(diff_df, tol_abs=tol_abs, tol_rel=tol_rel)
+        bad_df = _bad_rows(diff_df, tol_abs=tol_abs, tol_rel=tol_rel)
+        first_bad_time = str(bad_df["time"].iloc[0]) if len(bad_df) > 0 else None
+        last_bad_time = str(bad_df["time"].iloc[-1]) if len(bad_df) > 0 else None
         diff_csv = diff_dir / f"{fold}_diff.csv"
         diff_df.to_csv(diff_csv, index=False)
         fold_ok = rows_bad == 0
@@ -149,6 +164,8 @@ def run_compare(
                 max_abs_diff=max_abs,
                 max_rel_diff=max_rel,
                 rows_over_threshold=rows_bad,
+                first_bad_time=first_bad_time,
+                last_bad_time=last_bad_time,
                 pass_fold=fold_ok,
                 diff_csv=str(diff_csv),
             )
@@ -181,12 +198,24 @@ def run_compare(
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
+    by_fold_csv = summary_path.parent / "rolling_diff_by_fold.csv"
+    by_fold_df = pd.DataFrame([asdict(x) for x in results])
+    by_fold_df.to_csv(by_fold_csv, index=False)
+
     for r in results:
         status = "PASS" if r.pass_fold else "FAIL"
         print(
             f"[rolling-compare] {status} fold={r.fold} rows={r.rows_compared} "
-            f"max_abs={r.max_abs_diff} rows_over={r.rows_over_threshold}"
+            f"max_abs={r.max_abs_diff} rows_over={r.rows_over_threshold} "
+            f"first_bad={r.first_bad_time} last_bad={r.last_bad_time}"
         )
+        if not r.pass_fold:
+            bad_df = _bad_rows(compare_curves(read_curve(r.legacy_csv), read_curve(r.new_csv)), tol_abs=tol_abs, tol_rel=tol_rel)
+            cols = ["time", "equity_old", "equity_new", "abs_diff", "rel_diff"]
+            top_df = bad_df.sort_values("abs_diff", ascending=False).head(int(max(1, topn)))
+            print(f"[rolling-compare] top_bad_rows fold={r.fold}:")
+            print(top_df[cols].to_string(index=False))
+    print(f"[rolling-compare] by_fold_csv={by_fold_csv}")
     print(f"[rolling-compare] summary={summary_path}")
     print(f"[rolling-compare] overall={'PASS' if overall_pass else 'FAIL'}")
     return 0 if overall_pass else 2
