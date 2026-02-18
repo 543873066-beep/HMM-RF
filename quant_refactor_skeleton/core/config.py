@@ -22,7 +22,7 @@ class PipelineConfig:
     adx_n: int = 14
     super_state_export_start_date: Optional[str] = "2022-01-13 13:30:00"
     super_state_export_end_date: Optional[str] = None
-    enable_legacy_backfill: bool = True
+    enable_legacy_backfill: bool = False
 
 
 def build_pipeline_config(

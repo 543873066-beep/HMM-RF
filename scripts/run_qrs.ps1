@@ -9,6 +9,7 @@ param(
 
     [string]$InputCsv = "data\sh000852_5m.csv",
     [string]$OutRoot = "outputs_rebuild\qrs_runs",
+    [Nullable[int]]$LegacyBackfill = $null,
     [double]$TolAbs = 1e-10,
     [double]$TolRel = 1e-10,
     [int]$TopN = 20,
@@ -35,6 +36,24 @@ function Invoke-Python {
     param([Parameter(Mandatory = $true)][string[]]$Args)
     & python @Args | Out-Host
     return $LASTEXITCODE
+}
+
+function Resolve-LegacyBackfillValue {
+    if ($null -ne $LegacyBackfill) {
+        return ([int]$LegacyBackfill -ne 0)
+    }
+    $envVal = $env:QRS_LEGACY_BACKFILL
+    if ([string]::IsNullOrWhiteSpace($envVal)) {
+        return $true
+    }
+    $v = $envVal.Trim().ToLowerInvariant()
+    return ($v -in @("1", "true", "yes", "y", "on"))
+}
+
+function New-RouteArgs([string]$CsvPath, [string]$OutDir) {
+    $backfill = Resolve-LegacyBackfillValue
+    $bf = if ($backfill) { "1" } else { "0" }
+    return @("--", "--input_csv", $CsvPath, "--out_dir", $OutDir, "--enable_legacy_backfill", $bf)
 }
 
 function Get-BestEquityCsv([string]$RootDir) {
@@ -67,7 +86,7 @@ function Get-LatestCompareRun([string]$RootDir) {
     if (-not (Test-Path -LiteralPath $RootDir)) { return $null }
     return Get-ChildItem -LiteralPath $RootDir -Directory |
         Where-Object { (Test-Path (Join-Path $_.FullName "legacy")) -and (Test-Path (Join-Path $_.FullName "new")) } |
-        Sort-Object LastWriteTime -Descending |
+        Sort-Object Name -Descending |
         Select-Object -First 1
 }
 
@@ -98,7 +117,7 @@ try {
                 $rc = Invoke-Python @("msp_engine_ewma_exhaustion_opt_atr_momo.py", "--input_csv", $InputCsv, "--out_dir", $outDir)
             } else {
                 $env:QRS_PIPELINE_ROUTE = "new"
-                $rc = Invoke-Python @("scripts\run_engine_compat.py", "--route", "new", "--", "--input_csv", $InputCsv, "--out_dir", $outDir)
+                $rc = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (New-RouteArgs $InputCsv $outDir))
             }
             if ($rc -ne 0) { exit $rc }
             Write-Host ("[QRS] mode=engine route={0} out_dir={1}" -f $Route, (Resolve-Path $outDir).Path)
@@ -117,10 +136,12 @@ try {
                 $rc = Invoke-Python @(
                     "scripts\run_rolling_compat.py",
                     "--route", "new",
-                    "--",
-                    "--input_csv", $InputCsv,
-                    "--out_dir", $foldDir
+                    "--"
                 )
+                if ($rc -eq 0) {
+                    $env:QRS_PIPELINE_ROUTE = "new"
+                    $rc = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (New-RouteArgs $InputCsv $foldDir))
+                }
             }
             if ($rc -ne 0) { exit $rc }
             Write-Host ("[QRS] mode=rolling route={0} out_root={1}" -f $Route, (Resolve-Path $runRoot).Path)
@@ -136,7 +157,7 @@ try {
             if ($rcLegacy -ne 0) { Write-Error ("Legacy run failed with code {0}" -f $rcLegacy) }
 
             $env:QRS_PIPELINE_ROUTE = "new"
-            $rcNew = Invoke-Python @("scripts\run_engine_compat.py", "--route", "new", "--", "--input_csv", $InputCsv, "--out_dir", $newDir)
+            $rcNew = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (New-RouteArgs $InputCsv $newDir))
             if ($rcNew -ne 0) { Write-Error ("New run failed with code {0}" -f $rcNew) }
 
             $oldEq = Get-BestEquityCsv $legacyDir
@@ -169,7 +190,7 @@ try {
                 $compareRc = Invoke-Python @("msp_engine_ewma_exhaustion_opt_atr_momo.py", "--input_csv", $InputCsv, "--out_dir", (Join-Path (Join-Path $OutRoot $timestamp) "legacy"))
                 if ($compareRc -ne 0) { Write-Error ("Bootstrap legacy run failed: {0}" -f $compareRc) }
                 $env:QRS_PIPELINE_ROUTE = "new"
-                $newRc = Invoke-Python @("scripts\run_engine_compat.py", "--route", "new", "--", "--input_csv", $InputCsv, "--out_dir", (Join-Path (Join-Path $OutRoot $timestamp) "new"))
+                $newRc = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (New-RouteArgs $InputCsv (Join-Path (Join-Path $OutRoot $timestamp) "new")))
                 if ($newRc -ne 0) { Write-Error ("Bootstrap new run failed: {0}" -f $newRc) }
                 $latest = Get-LatestCompareRun $OutRoot
                 if ($null -eq $latest) { Write-Error ("No valid compare run found after bootstrap under {0}" -f $OutRoot) }
