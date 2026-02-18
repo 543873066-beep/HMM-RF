@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -62,6 +63,67 @@ def _save_with_time_index(df, out_csv: Path) -> None:
     tmp = df.copy()
     tmp = tmp.reset_index().rename(columns={tmp.index.name or "index": "time"})
     tmp.to_csv(out_csv, index=False, encoding="utf-8-sig")
+
+
+def _digest_df_edges(df: pd.DataFrame, cols: list[str], n: int = 64) -> str:
+    if df is None or len(df) == 0:
+        return "empty"
+    use_cols = [c for c in cols if c in df.columns]
+    if not use_cols:
+        use_cols = list(df.columns[: min(8, len(df.columns))])
+    edge = pd.concat([df[use_cols].head(n), df[use_cols].tail(n)], axis=0)
+    hashed = pd.util.hash_pandas_object(edge, index=True).astype("uint64")
+    return str(int(hashed.sum()))
+
+
+def _stage_summary(df: pd.DataFrame, key_cols: list[str]) -> dict:
+    out = {
+        "rows": int(len(df)),
+        "time_min": None,
+        "time_max": None,
+        "key_cols": [c for c in key_cols if c in df.columns],
+        "key_hash_edges": _digest_df_edges(df, key_cols),
+    }
+    if len(df) > 0:
+        out["time_min"] = str(df.index.min())
+        out["time_max"] = str(df.index.max())
+    return out
+
+
+def _dump_fold_inputs_summary(
+    out_dir: Path,
+    input_csv: Path,
+    args: argparse.Namespace,
+    feat_5m: pd.DataFrame,
+    super_df: pd.DataFrame,
+    rf_inputs: pd.DataFrame,
+) -> None:
+    summary = {
+        "input_csv": str(input_csv),
+        "out_dir": str(out_dir),
+        "run_id": str(args.run_id) if args.run_id is not None else None,
+        "data_end_date": str(args.data_end_date) if args.data_end_date is not None else None,
+        "trade_start_date": str(args.trade_start_date) if args.trade_start_date is not None else None,
+        "trade_end_date": str(args.trade_end_date) if args.trade_end_date is not None else None,
+        "features_5m": _stage_summary(feat_5m, ["close", "log_ret_1", "atr_14", "momentum_10"]),
+        "super_state": _stage_summary(
+            super_df,
+            ["super_state", "posterior_maxp", "stability_score", "avg_run_local", "switch_rate_local"],
+        ),
+        "rf_inputs": _stage_summary(rf_inputs, ["close", "super_state", "gate_on", "y_ret_4"]),
+    }
+    if "super_state" in super_df.columns and len(super_df) > 0:
+        vc = (
+            pd.to_numeric(super_df["super_state"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .value_counts()
+            .sort_index()
+            .to_dict()
+        )
+        summary["super_state"]["distribution"] = {str(k): int(v) for k, v in vc.items()}
+    out_path = out_dir / "fold_inputs_summary.json"
+    out_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
 
 def _apply_super_export_domain(df, cfg):
@@ -249,6 +311,7 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     _save_with_time_index(overlay_super_df, out_dir / "super_state.csv")
     rf_inputs = _build_rf_inputs(overlay_super_df)
     _save_with_time_index(rf_inputs, out_dir / "rf_inputs.csv")
+    _dump_fold_inputs_summary(out_dir, input_path, args, feat_5m, overlay_super_df, rf_inputs)
 
     print(f"[QRS:new] features_5m rows={len(feat_5m)} cols={len(feat_5m.columns)}")
     print(f"[QRS:new] super_state rows={len(overlay_super_df)} cols={len(overlay_super_df.columns)}")
