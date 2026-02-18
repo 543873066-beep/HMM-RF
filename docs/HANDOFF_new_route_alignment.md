@@ -50,3 +50,14 @@ outputs_rebuild/
 ## Known Issues And Workarounds
 - `Model is not converging`：HMM 拟合告警，当前不作为回归阻断条件。
 - Windows 编码（GBK/emoji）问题：通过 wrapper 在子进程内设置 `PYTHONUTF8=1` 规避；不改旧脚本。
+
+## Self-contained Alignment (Post N9-1)
+- 从 N9-1 开始，new-route 不再读取 legacy 输出文件；features/super_state/rf_inputs/equity 都由 refactor 链路自行计算。
+- 之所以仍能保持 equity 0 diff，是因为我们对齐的是可观测产物链：`features -> super_state -> rf_inputs -> equity`。
+- 核心做法是保持同一时间域、同一特征列集合与顺序、同一训练/交易切分、同一门控与回测规则。
+- 验证方法：
+  - `run_qrs.ps1 -Mode stage-diff`：检查 features/super_state/rf_inputs 是否在噪声级。
+  - `run_qrs.ps1 -Mode compare`：检查 equity 是否 `rows_over_threshold=0` 且 `max_abs_diff=0.0`。
+- 常见误区：
+  - hmmlearn 的 `Model is not converging` 通常是训练告警，不等于回归失败；是否通过以产物与对齐指标为准。
+  - PowerShell/GBK 环境下 emoji 可能导致编码报错；wrapper 已内置 UTF-8 兜底，不需要改旧脚本。
