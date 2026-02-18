@@ -5,6 +5,13 @@ import pandas as pd
 from hmmlearn.hmm import GaussianHMM
 from sklearn.preprocessing import StandardScaler
 
+
+def get_hmm_fit_defaults(cfg=None):
+    n_iter = int(getattr(cfg, "hmm_n_iter", 500)) if cfg is not None else 500
+    tol = float(getattr(cfg, "hmm_tol", 1e-2)) if cfg is not None else 1e-2
+    min_covar = float(getattr(cfg, "min_covar", 1e-3)) if cfg is not None else 1e-3
+    return {"n_iter": n_iter, "tol": tol, "min_covar": min_covar}
+
 def _force_random_init_hmm(model: GaussianHMM, X_fit_s: np.ndarray, seed: int, min_covar: float = 1e-3):
     if X_fit_s is None or len(X_fit_s) < model.n_components:
         return

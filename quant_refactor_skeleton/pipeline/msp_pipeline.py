@@ -203,6 +203,10 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         return 7
     overlay_super_df = _apply_super_export_domain(overlay_super_df, cfg)
     if not bool(getattr(cfg, "enable_legacy_backfill", True)):
+        overlay_super_df = super_hmm_mod.recompute_posterior_stability_metrics(
+            overlay_super_df,
+            n_states=7,
+        )
         overlay_super_df = super_hmm_mod.recompute_runlife_metrics(
             overlay_super_df,
             avg_run_window=200,

@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 
 def run_super_hmm_from_overlay(df_overlay: pd.DataFrame, cfg: "Config"):
     from quant_refactor_skeleton.features.feature_builder import pick_fit_mask_by_date
-    from quant_refactor_skeleton.hmm.model import align_states_by_volatility
+    from quant_refactor_skeleton.hmm.model import align_states_by_volatility, get_hmm_fit_defaults
     from quant_refactor_skeleton.super_state.lifecycle import (
         compute_avg_run_local_expected_life_online_ewma,
         compute_run_len_so_far,
@@ -58,16 +58,18 @@ def run_super_hmm_from_overlay(df_overlay: pd.DataFrame, cfg: "Config"):
     best_model = None
     best_ll = -np.inf
 
+    fit_defaults = get_hmm_fit_defaults(cfg)
     for i in range(int(cfg.num_inits)):
         current_seed = int(cfg.rs_super) + i
         try:
             model = GaussianHMM(
                 n_components=best_k,
                 covariance_type="full",
-                n_iter=500,
+                n_iter=int(fit_defaults["n_iter"]),
+                tol=float(fit_defaults["tol"]),
                 random_state=current_seed,
                 verbose=False,
-                min_covar=float(cfg.min_covar),
+                min_covar=float(fit_defaults["min_covar"]),
             )
             model.fit(X_fit_s)
         except ValueError:
@@ -75,7 +77,8 @@ def run_super_hmm_from_overlay(df_overlay: pd.DataFrame, cfg: "Config"):
                 model = GaussianHMM(
                     n_components=best_k,
                     covariance_type="diag",
-                    n_iter=500,
+                    n_iter=int(fit_defaults["n_iter"]),
+                    tol=float(fit_defaults["tol"]),
                     random_state=current_seed,
                     verbose=False,
                     min_covar=1e-2,
@@ -93,7 +96,8 @@ def run_super_hmm_from_overlay(df_overlay: pd.DataFrame, cfg: "Config"):
         best_model = GaussianHMM(
             n_components=best_k,
             covariance_type="diag",
-            n_iter=500,
+            n_iter=int(fit_defaults["n_iter"]),
+            tol=float(fit_defaults["tol"]),
             random_state=int(cfg.rs_super),
             min_covar=0.1,
         )
@@ -221,6 +225,15 @@ def run_super_stage_placeholder(argv=None) -> int:
         print("placeholder: super-state stage")
         return 0
     return 0
+
+
+def recompute_posterior_stability_metrics(df: pd.DataFrame, n_states: int = 7) -> pd.DataFrame:
+    out = df.copy()
+    if "posterior_maxp" in out.columns and "posterior_entropy" in out.columns:
+        ent = pd.to_numeric(out["posterior_entropy"], errors="coerce")
+        out["stability_score"] = 1.0 - (ent / np.log(max(2, int(n_states))))
+        out["mixed_signals"] = 1.0 - out["stability_score"]
+    return out
 
 
 def recompute_runlife_metrics(
