@@ -35,6 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--input_tf_minutes", type=int)
     p.add_argument("--export_live_pack", type=str)
     p.add_argument("--live_pack_dir", type=str)
+    p.add_argument("--enable_legacy_backfill", type=str)
     return p
 
 
@@ -43,11 +44,16 @@ def _normalize_argv(argv: Optional[Sequence[str]]) -> list[str]:
 
 
 def _build_cfg(args: argparse.Namespace):
+    enable_backfill = None
+    if args.enable_legacy_backfill is not None:
+        v = str(args.enable_legacy_backfill).strip().lower()
+        enable_backfill = v in {"1", "true", "yes", "y", "on"}
     return build_pipeline_config(
         input_csv=args.input_csv,
         out_dir=args.out_dir,
         run_id=args.run_id,
         input_tf_minutes=args.input_tf_minutes,
+        enable_legacy_backfill=enable_backfill,
     )
 
 
@@ -212,14 +218,15 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         print(f"[QRS:new] error: rf pipeline returned {rc_rf}")
         return rc_rf
 
-    legacy_super_df = _load_legacy_super_state_if_exists(out_dir)
-    if legacy_super_df is not None:
-        legacy_super_df = _apply_super_export_domain(legacy_super_df, cfg)
-        aligned_super_df = _backfill_super_state_fields(overlay_super_df, legacy_super_df)
-        _save_with_time_index(aligned_super_df, out_dir / "super_state.csv")
-        aligned_rf_inputs = _build_rf_inputs(aligned_super_df)
-        _save_with_time_index(aligned_rf_inputs, out_dir / "rf_inputs.csv")
-        print(f"[QRS:new] super_state labels backfilled from legacy rows={len(legacy_super_df)}")
+    if bool(getattr(cfg, "enable_legacy_backfill", True)):
+        legacy_super_df = _load_legacy_super_state_if_exists(out_dir)
+        if legacy_super_df is not None:
+            legacy_super_df = _apply_super_export_domain(legacy_super_df, cfg)
+            aligned_super_df = _backfill_super_state_fields(overlay_super_df, legacy_super_df)
+            _save_with_time_index(aligned_super_df, out_dir / "super_state.csv")
+            aligned_rf_inputs = _build_rf_inputs(aligned_super_df)
+            _save_with_time_index(aligned_rf_inputs, out_dir / "rf_inputs.csv")
+            print(f"[QRS:new] super_state labels backfilled from legacy rows={len(legacy_super_df)}")
 
     print("[QRS:new] N4 pipeline finished")
     return 0

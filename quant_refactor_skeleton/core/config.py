@@ -22,6 +22,7 @@ class PipelineConfig:
     adx_n: int = 14
     super_state_export_start_date: Optional[str] = "2022-01-13 13:30:00"
     super_state_export_end_date: Optional[str] = None
+    enable_legacy_backfill: bool = True
 
 
 def build_pipeline_config(
@@ -31,6 +32,7 @@ def build_pipeline_config(
     input_tf_minutes: Optional[int] = None,
     super_state_export_start_date: Optional[str] = None,
     super_state_export_end_date: Optional[str] = None,
+    enable_legacy_backfill: Optional[bool] = None,
 ) -> PipelineConfig:
     cfg = PipelineConfig()
     if input_csv:
@@ -45,6 +47,8 @@ def build_pipeline_config(
         cfg.super_state_export_start_date = str(super_state_export_start_date)
     if super_state_export_end_date is not None:
         cfg.super_state_export_end_date = str(super_state_export_end_date)
+    if enable_legacy_backfill is not None:
+        cfg.enable_legacy_backfill = bool(enable_legacy_backfill)
     return cfg
 
 
