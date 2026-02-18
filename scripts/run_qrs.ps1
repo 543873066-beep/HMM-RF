@@ -61,6 +61,19 @@ function New-RouteArgs([string]$CsvPath, [string]$OutDir) {
     return @("--", "--input_csv", $CsvPath, "--out_dir", $OutDir, "--enable_legacy_backfill", $bf)
 }
 
+function Build-NewRouteArgs([string]$CsvPath, [string]$OutDir, [hashtable]$ExtraArgs) {
+    $args = New-RouteArgs $CsvPath $OutDir
+    if ($null -ne $ExtraArgs) {
+        foreach ($k in $ExtraArgs.Keys) {
+            $v = $ExtraArgs[$k]
+            if (-not [string]::IsNullOrWhiteSpace([string]$v)) {
+                $args += @("--$k", [string]$v)
+            }
+        }
+    }
+    return $args
+}
+
 function Apply-LegacyBackfillEnv {
     $backfill = Resolve-LegacyBackfillValue
     if ($backfill) {
@@ -117,6 +130,35 @@ function Sync-LegacyRollingEquity([string]$TargetRoot) {
     New-Item -ItemType Directory -Force -Path $dstDir | Out-Null
     Copy-Item -LiteralPath $latest -Destination $dst -Force
     return @($dst)
+}
+
+function Get-LegacyRollingContext {
+    $ctx = @{}
+    $runsRoot = "outputs_roll\runs"
+    if (-not (Test-Path -LiteralPath $runsRoot)) { return $ctx }
+    $cycleDir = Get-ChildItem -LiteralPath $runsRoot -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($null -eq $cycleDir) { return $ctx }
+    $ctx["cycle_dir"] = $cycleDir.FullName
+    if ($cycleDir.Name -match "^C\d+_(\d{4}-\d{2}-\d{2})_to_(\d{4}-\d{2}-\d{2})$") {
+        $ctx["data_end_date"] = "$($Matches[1]) 15:00:00"
+    }
+    $top5 = Join-Path $cycleDir.FullName "top5_selection.csv"
+    if (Test-Path -LiteralPath $top5) {
+        try {
+            $rows = Import-Csv -LiteralPath $top5
+            if ($rows.Count -gt 0) {
+                $r0 = $rows[0]
+                if ($null -ne $r0.trade_start -and $null -ne $r0.trade_end) {
+                    $ctx["trade_start_date"] = [string]$r0.trade_start
+                    $ctx["trade_end_date"] = [string]$r0.trade_end
+                }
+                if ($null -ne $r0.rs_5m) { $ctx["rs_5m"] = [string]$r0.rs_5m }
+                if ($null -ne $r0.rs_30m) { $ctx["rs_30m"] = [string]$r0.rs_30m }
+                if ($null -ne $r0.rs_1d) { $ctx["rs_1d"] = [string]$r0.rs_1d }
+            }
+        } catch {}
+    }
+    return $ctx
 }
 
 function Get-LatestCompareRun([string]$RootDir) {
@@ -184,7 +226,19 @@ try {
                 $foldDir = Join-Path $outDir "fold_001"
                 New-Item -ItemType Directory -Force -Path $foldDir | Out-Null
                 $env:QRS_PIPELINE_ROUTE = "new"
-                $rc = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (New-RouteArgs $InputCsv $foldDir))
+                $legacyCtx = Get-LegacyRollingContext
+                $extra = @{
+                    "run_id" = "fold_001"
+                    "enable_backtest" = "1"
+                    "data_end_date" = $legacyCtx["data_end_date"]
+                    "trade_start_date" = $legacyCtx["trade_start_date"]
+                    "trade_end_date" = $legacyCtx["trade_end_date"]
+                    "rs_5m" = $legacyCtx["rs_5m"]
+                    "rs_30m" = $legacyCtx["rs_30m"]
+                    "rs_1d" = $legacyCtx["rs_1d"]
+                }
+                Write-Host ("[QRS] rolling fold_001 argv: data_end={0}, trade_start={1}, trade_end={2}, rs=({3},{4},{5})" -f $extra["data_end_date"], $extra["trade_start_date"], $extra["trade_end_date"], $extra["rs_5m"], $extra["rs_30m"], $extra["rs_1d"])
+                $rc = Invoke-Python (@("scripts\run_engine_compat.py", "--route", "new") + (Build-NewRouteArgs $InputCsv $foldDir $extra))
             }
             if ($rc -ne 0) { exit $rc }
             $resolvedOutRoot = (Resolve-Path $runRoot).Path
