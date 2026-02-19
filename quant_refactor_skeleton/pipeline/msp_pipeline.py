@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from datetime import datetime
@@ -38,6 +39,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--export_live_pack", type=str)
     p.add_argument("--live_pack_dir", type=str)
     p.add_argument("--enable_legacy_backfill", type=str)
+    p.add_argument("--disable_legacy_equity_fallback_in_rolling", type=str)
     return p
 
 
@@ -50,12 +52,17 @@ def _build_cfg(args: argparse.Namespace):
     if args.enable_legacy_backfill is not None:
         v = str(args.enable_legacy_backfill).strip().lower()
         enable_backfill = v in {"1", "true", "yes", "y", "on"}
+    disable_equity_fallback = None
+    if args.disable_legacy_equity_fallback_in_rolling is not None:
+        v = str(args.disable_legacy_equity_fallback_in_rolling).strip().lower()
+        disable_equity_fallback = v in {"1", "true", "yes", "y", "on"}
     return build_pipeline_config(
         input_csv=args.input_csv,
         out_dir=args.out_dir,
         run_id=args.run_id,
         input_tf_minutes=args.input_tf_minutes,
         enable_legacy_backfill=enable_backfill,
+        disable_legacy_equity_fallback_in_rolling=disable_equity_fallback,
     )
 
 
@@ -63,6 +70,51 @@ def _save_with_time_index(df, out_csv: Path) -> None:
     tmp = df.copy()
     tmp = tmp.reset_index().rename(columns={tmp.index.name or "index": "time"})
     tmp.to_csv(out_csv, index=False, encoding="utf-8-sig")
+
+
+def _file_sha256(path: Path) -> str | None:
+    if not path.exists() or not path.is_file():
+        return None
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _csv_rows(path: Path) -> int | None:
+    if not path.exists() or not path.is_file():
+        return None
+    with path.open("rb") as f:
+        count = 0
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            count += chunk.count(b"\n")
+    return max(0, count - 1)
+
+
+def _manifest_artifacts(out_dir: Path) -> list[dict]:
+    candidates = [
+        out_dir / "features_5m.csv",
+        out_dir / "super_state.csv",
+        out_dir / "rf_inputs.csv",
+        out_dir / "rf_h4_per_state_dynamic_selected" / "backtest_equity_curve.csv",
+    ]
+    items: list[dict] = []
+    for p in candidates:
+        items.append(
+            {
+                "path": str(p),
+                "exists": p.exists(),
+                "sha256": _file_sha256(p),
+                "rows": _csv_rows(p),
+            }
+        )
+    return items
+
+
+def _write_manifest(out_dir: Path, manifest: dict) -> None:
+    out_path = out_dir / "run_manifest.json"
+    out_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 def _digest_df_edges(df: pd.DataFrame, cols: list[str], n: int = 64) -> str:
@@ -229,13 +281,34 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     parser = _build_parser()
     args, _ = parser.parse_known_args(_normalize_argv(argv))
 
+    stage = "init"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    manifest: dict = {
+        "route": "new",
+        "timestamp": timestamp,
+        "input_csv": None,
+        "input_csv_sha256": None,
+        "input_csv_rows": None,
+        "out_dir": None,
+        "run_id": None,
+        "stage": stage,
+        "config": {},
+        "artifacts": [],
+        "error": None,
+    }
+
     input_csv = str(args.input_csv or "").strip()
     if not input_csv:
+        manifest["error"] = "missing_input_csv"
+        _write_manifest(Path(str(args.out_dir or "outputs")), manifest)
         print("[QRS:new] error: --input_csv is required")
         return 2
 
     input_path = Path(input_csv)
     if not input_path.exists():
+        manifest["input_csv"] = str(input_path.resolve())
+        manifest["error"] = "input_csv_not_found"
+        _write_manifest(Path(str(args.out_dir or "outputs")), manifest)
         print(f"[QRS:new] error: input_csv does not exist: {input_path}")
         return 2
 
@@ -243,6 +316,28 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
     cfg = _build_cfg(args)
+
+    manifest["input_csv"] = str(input_path.resolve())
+    manifest["input_csv_sha256"] = _file_sha256(input_path)
+    manifest["input_csv_rows"] = _csv_rows(input_path)
+    manifest["out_dir"] = str(out_dir.resolve())
+    manifest["run_id"] = run_id
+    manifest["config"] = {
+        "rs_5m": args.rs_5m,
+        "rs_30m": args.rs_30m,
+        "rs_1d": args.rs_1d,
+        "data_end_date": args.data_end_date,
+        "trade_start_date": args.trade_start_date,
+        "trade_end_date": args.trade_end_date,
+        "enable_legacy_backfill": getattr(cfg, "enable_legacy_backfill", None),
+        "disable_legacy_equity_fallback_in_rolling": getattr(
+            cfg, "disable_legacy_equity_fallback_in_rolling", None
+        ),
+        "input_tf_minutes": args.input_tf_minutes,
+        "enable_backtest": args.enable_backtest,
+        "export_live_pack": args.export_live_pack,
+        "live_pack_dir": args.live_pack_dir,
+    }
 
     print(f"[QRS:new] pipeline=msp input_csv={input_path}")
     print(f"[QRS:new] pipeline=msp out_dir={out_dir.resolve()}")
@@ -252,17 +347,24 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         print("[QRS:new] legacy_backfill=on (diagnostic mode)")
     else:
         print("[QRS:new] legacy_backfill=off (self-contained)")
+    stage = "data.loaders"
+    manifest["stage"] = stage
     print("[QRS:new] stage=data.loaders")
     df_raw = data_loaders.load_ohlcv_csv(str(input_path))
     df_5m = data_loaders.normalize_input_5m(df_raw, cfg)
     df_30m = data_resample.resample_ohlcv(df_5m, "30min", cfg)
     df_1d = data_resample.resample_ohlcv(df_5m, "1D", cfg)
 
+    stage = "features.make_features"
+    manifest["stage"] = stage
     print("[QRS:new] stage=features.make_features")
     feat_5m = feature_builder_mod.make_features(df_5m, cfg, "5m")
     feat_30m = feature_builder_mod.make_features(df_30m, cfg, "30m")
     feat_1d = feature_builder_mod.make_features(df_1d, cfg, "1d")
     if feat_5m.empty:
+        manifest["error"] = "features_empty"
+        manifest["artifacts"] = _manifest_artifacts(out_dir)
+        _write_manifest(out_dir, manifest)
         print("[QRS:new] error: feature table is empty after make_features")
         return 4
 
@@ -273,12 +375,20 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     core_cols = ["log_ret_1", "atr_14", "momentum_10"]
     missing = [c for c in core_cols if c not in feat_5m.columns]
     if missing:
+        manifest["error"] = f"missing_core_features:{missing}"
+        manifest["artifacts"] = _manifest_artifacts(out_dir)
+        _write_manifest(out_dir, manifest)
         print(f"[QRS:new] error: missing core feature columns: {missing}")
         return 5
 
+    stage = "overlay.super_state"
+    manifest["stage"] = stage
     print("[QRS:new] stage=overlay.super_state")
     overlay_super_df = overlay_builder_mod.build_overlay_superstate_minimal(df_5m, feat_5m, cfg=None)
     if overlay_super_df.empty:
+        manifest["error"] = "overlay_super_state_empty"
+        manifest["artifacts"] = _manifest_artifacts(out_dir)
+        _write_manifest(out_dir, manifest)
         print("[QRS:new] error: overlay/super_state table is empty")
         return 6
     required_super_cols = [
@@ -292,6 +402,9 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     ]
     missing_super = [c for c in required_super_cols if c not in overlay_super_df.columns]
     if missing_super:
+        manifest["error"] = f"missing_super_state_columns:{missing_super}"
+        manifest["artifacts"] = _manifest_artifacts(out_dir)
+        _write_manifest(out_dir, manifest)
         print(f"[QRS:new] error: missing super_state columns: {missing_super}")
         return 7
     overlay_super_df = _apply_super_export_domain(overlay_super_df, cfg)
@@ -316,11 +429,16 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     print(f"[QRS:new] features_5m rows={len(feat_5m)} cols={len(feat_5m.columns)}")
     print(f"[QRS:new] super_state rows={len(overlay_super_df)} cols={len(overlay_super_df.columns)}")
     print(f"[QRS:new] rf_inputs rows={len(rf_inputs)} cols={len(rf_inputs.columns)}")
+    stage = "rf.pipeline"
+    manifest["stage"] = stage
     print("[QRS:new] stage=rf.pipeline")
     from quant_refactor_skeleton.pipeline import rf_pipeline as rf_pipeline_mod
 
     rc_rf = int(rf_pipeline_mod.run_rf_pipeline(rf_inputs, cfg, argv=list(_normalize_argv(argv))))
     if rc_rf != 0:
+        manifest["error"] = f"rf_pipeline_error:{rc_rf}"
+        manifest["artifacts"] = _manifest_artifacts(out_dir)
+        _write_manifest(out_dir, manifest)
         print(f"[QRS:new] error: rf pipeline returned {rc_rf}")
         return rc_rf
 
@@ -342,6 +460,8 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
             aligned_rf_inputs = _build_rf_inputs(aligned_super_df)
             _save_with_time_index(aligned_rf_inputs, out_dir / "rf_inputs.csv")
 
+    manifest["artifacts"] = _manifest_artifacts(out_dir)
+    _write_manifest(out_dir, manifest)
     print("[QRS:new] N4 pipeline finished")
     return 0
 
