@@ -18,6 +18,22 @@
   - same gate/backtest rules
 
 
+
+## ??????? new?
+- ????? new route??? -Route ??? new??
+- ???????? no-fallback??
+  - `powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuildull_regression -DisableLegacyEquityFallback`
+
+## legacy ????
+- Engine ? legacy?
+  - `powershell -ExecutionPolicy Bypass -File scriptsun_qrs.ps1 -Mode engine -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\legacy_run`
+- Rolling ? legacy?
+  - `powershell -ExecutionPolicy Bypass -File scriptsun_qrs.ps1 -Mode rolling -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\legacy_rolling`
+
+## ??????no-fallback?
+- ? compare/rolling/full regression ???`-DisableLegacyEquityFallback`
+- ????????? legacy equity ???
+
 ## Routes and defaults
 - `legacy` route: runs the original scripts unchanged (`msp_engine_ewma_exhaustion_opt_atr_momo.py`, `rolling_runner.py`).
 - `new` route: runs the refactor pipeline under `quant_refactor_skeleton`.
