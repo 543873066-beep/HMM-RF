@@ -58,20 +58,19 @@ def _normalize_argv_for_rolling_compat(argv: list[str]) -> list[str]:
     out = [x for x in list(argv) if str(x) != "--"]
     input_csv = _get_arg(out, "input_csv")
     data_end = _get_arg(out, "data_end_date")
-    rolling = (_get_arg(out, "run_id") or "").lower().startswith("fold_")
+    legacy_ctx = _latest_legacy_roll_context()
     if input_csv and data_end and (not _has_arg(out, "trade_start_date")) and (not _has_arg(out, "trade_end_date")):
         window = _build_trade_window_from_data_end(input_csv=input_csv, data_end_date=data_end)
         if window is not None:
             ts, te = window
             out += ["--trade_start_date", ts, "--trade_end_date", te]
-    if rolling:
-        legacy_ctx = _latest_legacy_roll_context()
-        if not _has_arg(out, "trade_start_date") and legacy_ctx.get("trade_start_date"):
-            out = _upsert_arg(out, "trade_start_date", legacy_ctx["trade_start_date"])
-        if not _has_arg(out, "trade_end_date") and legacy_ctx.get("trade_end_date"):
-            out = _upsert_arg(out, "trade_end_date", legacy_ctx["trade_end_date"])
-        if legacy_ctx.get("trade_end_date"):
-            out = _upsert_arg(out, "data_end_date", legacy_ctx["trade_end_date"])
+    if not _has_arg(out, "trade_start_date") and legacy_ctx.get("trade_start_date"):
+        out = _upsert_arg(out, "trade_start_date", legacy_ctx["trade_start_date"])
+    if not _has_arg(out, "trade_end_date") and legacy_ctx.get("trade_end_date"):
+        out = _upsert_arg(out, "trade_end_date", legacy_ctx["trade_end_date"])
+    if legacy_ctx.get("trade_end_date"):
+        out = _upsert_arg(out, "data_end_date", legacy_ctx["trade_end_date"])
+    if (_get_arg(out, "run_id") or "").lower().startswith("fold_"):
         seed_triplet = _seed_from_latest_legacy_live()
         if seed_triplet is not None:
             out = _upsert_arg(out, "rs_5m", str(seed_triplet[0]))
