@@ -2,6 +2,9 @@
 param(
     [string]$InputCsv = "data\sh000852_5m.csv",
     [string]$OutRoot = "outputs_rebuild\rolling_compare_one_click",
+    [ValidateSet("legacy", "new")]
+    [string]$Route = "new",
+    [switch]$Legacy,
     [double]$TolAbs = 1e-10,
     [double]$TolRel = 1e-10,
     [int]$TopN = 20,
@@ -11,6 +14,11 @@ param(
 $ErrorActionPreference = "Stop"
 $env:PYTHONUTF8 = "1"
 
+
+$resolvedRoute = if ($Legacy) { "legacy" } else { $Route }
+$bfText = if ($env:QRS_LEGACY_BACKFILL -and $env:QRS_LEGACY_BACKFILL -ne "0") { "on" } else { "off" }
+$dfText = if ($DisableLegacyEquityFallback) { "on" } else { "off" }
+Write-Host ("[one-click-rolling] route={0} legacy_backfill={1} DisableLegacyEquityFallback={2}" -f $resolvedRoute, $bfText, $dfText)
 if (-not (Test-Path -LiteralPath $InputCsv)) {
     Write-Error ("Input CSV not found: {0}" -f $InputCsv)
 }
@@ -24,7 +32,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $newArgs = @(
     "-ExecutionPolicy", "Bypass", "-File", "scripts\run_qrs.ps1",
-    "-Mode", "rolling", "-Route", "new", "-InputCsv", $InputCsv, "-OutRoot", $newRoot
+    "-Mode", "rolling", "-Route", $resolvedRoute, "-InputCsv", $InputCsv, "-OutRoot", $newRoot
 )
 if ($DisableLegacyEquityFallback) {
     $newArgs += "-DisableLegacyEquityFallback"

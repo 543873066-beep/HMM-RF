@@ -2,12 +2,20 @@
 param(
     [string]$InputCsv = "data\sh000852_5m.csv",
     [string]$OutRoot = "outputs_rebuild\full_regression",
+    [ValidateSet("legacy", "new")]
+    [string]$Route = "new",
+    [switch]$Legacy,
     [switch]$DisableLegacyEquityFallback
 )
 
 $ErrorActionPreference = "Stop"
 $env:PYTHONUTF8 = "1"
 
+
+$resolvedRoute = if ($Legacy) { "legacy" } else { $Route }
+$bfText = if ($env:QRS_LEGACY_BACKFILL -and $env:QRS_LEGACY_BACKFILL -ne "0") { "on" } else { "off" }
+$dfText = if ($DisableLegacyEquityFallback) { "on" } else { "off" }
+Write-Host ("[one-click-full] route={0} legacy_backfill={1} DisableLegacyEquityFallback={2}" -f $resolvedRoute, $bfText, $dfText)
 if (-not (Test-Path -LiteralPath $InputCsv)) {
     Write-Error ("Input CSV not found: {0}" -f $InputCsv)
 }
@@ -35,7 +43,7 @@ function Fail-Step([string]$Step, [string]$Info) {
 # 1) engine compare
 $compareArgs = @(
     "-ExecutionPolicy", "Bypass", "-File", "scripts\run_qrs.ps1",
-    "-Mode", "compare", "-Route", "new", "-InputCsv", $InputCsv, "-OutRoot", $root
+    "-Mode", "compare", "-Route", $resolvedRoute, "-InputCsv", $InputCsv, "-OutRoot", $root
 )
 if ($DisableLegacyEquityFallback) {
     $compareArgs += "-DisableLegacyEquityFallback"
