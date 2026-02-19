@@ -17,6 +17,48 @@
   - same train/trade split
   - same gate/backtest rules
 
+
+## Routes and defaults
+- `legacy` route: runs the original scripts unchanged (`msp_engine_ewma_exhaustion_opt_atr_momo.py`, `rolling_runner.py`).
+- `new` route: runs the refactor pipeline under `quant_refactor_skeleton`.
+- Default is still legacy. To switch:
+  - Engine: set `QRS_PIPELINE_ROUTE=new` or use `scripts/run_qrs.ps1 -Mode engine -Route new`.
+  - Rolling: set `QRS_ROLLING_ROUTE=new` or use `scripts/run_qrs.ps1 -Mode rolling -Route new`.
+
+## One-click full regression (no-fallback)
+Recommended (PowerShell):
+
+`powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuildull_regression -DisableLegacyEquityFallback`
+
+What it does:
+- engine compare (legacy vs new)
+- stage-diff (features / super_state / rf_inputs)
+- rolling compare (fold-by-fold equity)
+
+PASS criteria:
+- engine compare: `rows_over_threshold=0` and `max_abs_diff=0`
+- rolling compare: `overall=PASS`
+
+## Common failures and how to check
+- ENGINE_COMPARE FAIL:
+  - open `regression_diff.csv` in the compare output root
+  - confirm `rolling`-only logic is not applied in engine mode (see N12-1A guard)
+- ROLLING FAIL:
+  - check `rolling_diff_by_fold.csv` and `rolling_diff_summary.json`
+- HMM warning `Model is not converging`:
+  - this is a training warning, not an automatic failure; only compare results decide PASS/FAIL
+- Windows encoding:
+  - if you see garbled output, set `PYTHONUTF8=1` before running or use the wrapper (no legacy edits)
+
+## Output layout (full regression)
+- `out_root/<timestamp>/legacy/...`
+- `out_root/<timestamp>/new/...`
+- Diff files:
+  - `regression_diff.csv` (engine compare)
+  - `rolling_diff_by_fold.csv` and `rolling_diff_summary.json` (rolling compare)
+- Reproducibility:
+  - `run_manifest.json` is written under each new-route out_dir and includes input hash/config/artifacts.
+
 ## Validation commands
 - Stage-level diff:
   - `powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode stage-diff -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\stage_check`
