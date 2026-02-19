@@ -30,6 +30,10 @@ class FoldResult:
     rows_over_threshold: int
     first_bad_time: str | None
     last_bad_time: str | None
+    len_old: int
+    len_new: int
+    coverage: float
+    fail_reason: str | None
     pass_fold: bool
     diff_csv: str
 
@@ -45,6 +49,26 @@ def _find_latest_run_root(root: Path) -> Path:
         return sorted(with_curves, key=lambda p: p.name, reverse=True)[0]
     stamped = sorted(children, key=lambda p: p.name, reverse=True)
     return stamped[0]
+
+
+def _is_file_path(p: Path) -> bool:
+    return p.exists() and p.is_file()
+
+
+def _is_under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_run_root(root: Path, side: str) -> Path:
+    if _is_file_path(root):
+        return root
+    run_root = _find_latest_run_root(root)
+    side_root = run_root / side
+    return side_root if side_root.exists() else run_root
 
 
 def _discover_fold_curves(root: Path) -> Dict[str, Path]:
@@ -117,6 +141,10 @@ def _top_rows(diff_df: pd.DataFrame, topn: int) -> list[dict]:
     return rows
 
 
+def _fail(reason: str) -> str:
+    return reason
+
+
 def run_compare(
     legacy_root: Path,
     new_root: Path,
@@ -125,8 +153,9 @@ def run_compare(
     topn: int,
     out_json: Path | None = None,
 ) -> int:
-    legacy_run = _find_latest_run_root(legacy_root)
-    new_run = _find_latest_run_root(new_root)
+    coverage_threshold = 0.95
+    legacy_run = _resolve_run_root(legacy_root, "legacy")
+    new_run = _resolve_run_root(new_root, "new")
 
     legacy_fallback = Path("outputs_roll") / "runs"
     legacy_curves = _discover_with_fallback(legacy_run, legacy_fallback if legacy_fallback.exists() else None)
@@ -145,14 +174,45 @@ def run_compare(
     for fold in common_folds:
         legacy_csv = legacy_curves[fold]
         new_csv = new_curves[fold]
-        diff_df = compare_curves(read_curve(str(legacy_csv)), read_curve(str(new_csv)))
+        reason = None
+        if not legacy_csv.exists() or legacy_csv.stat().st_size == 0:
+            reason = _fail("EQUITY_MISSING_OLD")
+        if not new_csv.exists() or new_csv.stat().st_size == 0:
+            reason = _fail("EQUITY_MISSING_NEW")
+        if reason is None:
+            if not _is_under(legacy_csv, legacy_run):
+                reason = _fail("PATH_OUT_OF_ROOT")
+            if not _is_under(new_csv, new_run):
+                reason = _fail("PATH_OUT_OF_ROOT")
+
+        if reason is None:
+            old_curve = read_curve(str(legacy_csv))
+            new_curve = read_curve(str(new_csv))
+            len_old = int(len(old_curve))
+            len_new = int(len(new_curve))
+            if len_old == 0 or len_new == 0:
+                reason = _fail("EQUITY_EMPTY")
+            diff_df = compare_curves(old_curve, new_curve)
+        else:
+            old_curve = pd.DataFrame(columns=["time", "equity"])
+            new_curve = pd.DataFrame(columns=["time", "equity"])
+            len_old = 0
+            len_new = 0
+            diff_df = pd.DataFrame(columns=["time", "equity_old", "equity_new", "abs_diff", "rel_diff"])
+
         rows, max_abs, max_rel, rows_bad = _compute_metrics(diff_df, tol_abs=tol_abs, tol_rel=tol_rel)
         bad_df = _bad_rows(diff_df, tol_abs=tol_abs, tol_rel=tol_rel)
         first_bad_time = str(bad_df["time"].iloc[0]) if len(bad_df) > 0 else None
         last_bad_time = str(bad_df["time"].iloc[-1]) if len(bad_df) > 0 else None
         diff_csv = diff_dir / f"{fold}_diff.csv"
         diff_df.to_csv(diff_csv, index=False)
-        fold_ok = (rows_bad == 0) and (rows > 0)
+        min_len = max(0, min(len_old, len_new))
+        coverage = float(rows) / float(min_len) if min_len > 0 else 0.0
+        if reason is None and rows == 0:
+            reason = _fail("ZERO_ROWS_COMPARED")
+        if reason is None and coverage < coverage_threshold:
+            reason = _fail("LOW_COVERAGE")
+        fold_ok = (rows_bad == 0) and (rows > 0) and (reason is None)
         if not fold_ok:
             overall_pass = False
         results.append(
@@ -166,6 +226,10 @@ def run_compare(
                 rows_over_threshold=rows_bad,
                 first_bad_time=first_bad_time,
                 last_bad_time=last_bad_time,
+                len_old=len_old,
+                len_new=len_new,
+                coverage=coverage,
+                fail_reason=reason,
                 pass_fold=fold_ok,
                 diff_csv=str(diff_csv),
             )
@@ -204,10 +268,16 @@ def run_compare(
 
     for r in results:
         status = "PASS" if r.pass_fold else "FAIL"
+        print(f"[rolling-compare] {status} fold={r.fold}")
+        print(f"[rolling-compare] old_path={Path(r.legacy_csv)}")
+        print(f"[rolling-compare] new_path={Path(r.new_csv)}")
         print(
-            f"[rolling-compare] {status} fold={r.fold} rows={r.rows_compared} "
-            f"max_abs={r.max_abs_diff} rows_over={r.rows_over_threshold} "
-            f"first_bad={r.first_bad_time} last_bad={r.last_bad_time}"
+            f"[rolling-compare] len_old={r.len_old} len_new={r.len_new} "
+            f"rows={r.rows_compared} coverage={r.coverage:.6f}"
+        )
+        print(
+            f"[rolling-compare] max_abs={r.max_abs_diff} rows_over={r.rows_over_threshold} "
+            f"first_bad={r.first_bad_time} last_bad={r.last_bad_time} reason={r.fail_reason}"
         )
         if not r.pass_fold:
             bad_df = _bad_rows(compare_curves(read_curve(r.legacy_csv), read_curve(r.new_csv)), tol_abs=tol_abs, tol_rel=tol_rel)
