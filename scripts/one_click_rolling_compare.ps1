@@ -4,7 +4,8 @@ param(
     [string]$OutRoot = "outputs_rebuild\rolling_compare_one_click",
     [double]$TolAbs = 1e-10,
     [double]$TolRel = 1e-10,
-    [int]$TopN = 20
+    [int]$TopN = 20,
+    [switch]$DisableLegacyEquityFallback
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,7 +22,14 @@ New-Item -ItemType Directory -Force -Path $legacyRoot, $newRoot | Out-Null
 powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode rolling -Route legacy -InputCsv $InputCsv -OutRoot $legacyRoot
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode rolling -Route new -InputCsv $InputCsv -OutRoot $newRoot
+$newArgs = @(
+    "-ExecutionPolicy", "Bypass", "-File", "scripts\run_qrs.ps1",
+    "-Mode", "rolling", "-Route", "new", "-InputCsv", $InputCsv, "-OutRoot", $newRoot
+)
+if ($DisableLegacyEquityFallback) {
+    $newArgs += "-DisableLegacyEquityFallback"
+}
+powershell @newArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 python tools\rolling_compare.py --legacy-root $legacyRoot --new-root $newRoot --tol-abs $TolAbs --tol-rel $TolRel --topn $TopN
