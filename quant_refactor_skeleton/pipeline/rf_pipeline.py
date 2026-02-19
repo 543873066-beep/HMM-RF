@@ -56,6 +56,10 @@ def _build_trade_window_from_data_end(input_csv: str, data_end_date: str) -> tup
 
 def _normalize_argv_for_rolling_compat(argv: list[str]) -> list[str]:
     out = [x for x in list(argv) if str(x) != "--"]
+    run_id = (_get_arg(out, "run_id") or "").lower()
+    is_rolling = run_id.startswith("fold_")
+    if not is_rolling:
+        return out
     input_csv = _get_arg(out, "input_csv")
     data_end = _get_arg(out, "data_end_date")
     legacy_ctx = _latest_legacy_roll_context()
@@ -70,25 +74,24 @@ def _normalize_argv_for_rolling_compat(argv: list[str]) -> list[str]:
         out = _upsert_arg(out, "trade_end_date", legacy_ctx["trade_end_date"])
     if legacy_ctx.get("trade_end_date"):
         out = _upsert_arg(out, "data_end_date", legacy_ctx["trade_end_date"])
-    if (_get_arg(out, "run_id") or "").lower().startswith("fold_"):
-        seed_triplet = _seed_from_latest_legacy_live()
-        if seed_triplet is not None:
-            out = _upsert_arg(out, "rs_5m", str(seed_triplet[0]))
-            out = _upsert_arg(out, "rs_30m", str(seed_triplet[1]))
-            out = _upsert_arg(out, "rs_1d", str(seed_triplet[2]))
-        for k in ("rs_5m", "rs_30m", "rs_1d"):
-            v = legacy_ctx.get(k)
-            if v is not None:
-                out = _upsert_arg(out, k, str(v))
-        rs5 = _get_arg(out, "rs_5m")
-        rs30 = _get_arg(out, "rs_30m")
-        rs1 = _get_arg(out, "rs_1d")
-        if rs5 and rs30 and rs1:
-            out = _upsert_arg(out, "run_id", f"LIVE1_{rs5}_{rs30}_{rs1}")
-        out = _upsert_arg(out, "input_tf_minutes", "5")
-        out = _upsert_arg(out, "enable_backtest", "1")
-        out = _upsert_arg(out, "export_live_pack", "1")
-        out = _upsert_arg(out, "live_pack_dir", "live_pack")
+    seed_triplet = _seed_from_latest_legacy_live()
+    if seed_triplet is not None:
+        out = _upsert_arg(out, "rs_5m", str(seed_triplet[0]))
+        out = _upsert_arg(out, "rs_30m", str(seed_triplet[1]))
+        out = _upsert_arg(out, "rs_1d", str(seed_triplet[2]))
+    for k in ("rs_5m", "rs_30m", "rs_1d"):
+        v = legacy_ctx.get(k)
+        if v is not None:
+            out = _upsert_arg(out, k, str(v))
+    rs5 = _get_arg(out, "rs_5m")
+    rs30 = _get_arg(out, "rs_30m")
+    rs1 = _get_arg(out, "rs_1d")
+    if rs5 and rs30 and rs1:
+        out = _upsert_arg(out, "run_id", f"LIVE1_{rs5}_{rs30}_{rs1}")
+    out = _upsert_arg(out, "input_tf_minutes", "5")
+    out = _upsert_arg(out, "enable_backtest", "1")
+    out = _upsert_arg(out, "export_live_pack", "1")
+    out = _upsert_arg(out, "live_pack_dir", "live_pack")
     return out
 
 
