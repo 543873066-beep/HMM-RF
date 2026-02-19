@@ -5,7 +5,9 @@ param(
     [string]$Mode,
 
     [ValidateSet("legacy", "new")]
-    [string]$Route = "new",
+    [AllowNull()]
+    [AllowEmptyString()]
+    [string]$Route = $null,
 
     [string]$InputCsv = "data\sh000852_5m.csv",
     [string]$OutRoot = "outputs_rebuild\qrs_runs",

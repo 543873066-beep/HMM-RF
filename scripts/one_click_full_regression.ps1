@@ -3,7 +3,9 @@ param(
     [string]$InputCsv = "data\sh000852_5m.csv",
     [string]$OutRoot = "outputs_rebuild\full_regression",
     [ValidateSet("legacy", "new")]
-    [string]$Route = "new",
+    [AllowNull()]
+    [AllowEmptyString()]
+    [string]$Route = $null,
     [switch]$Legacy,
     [switch]$DisableLegacyEquityFallback
 )
@@ -12,10 +14,22 @@ $ErrorActionPreference = "Stop"
 $env:PYTHONUTF8 = "1"
 
 
-$resolvedRoute = if ($Legacy) { "legacy" } else { $Route }
+$routeSource = "default"
+if ($Legacy) {
+    $resolvedRoute = "legacy"
+    $routeSource = "param"
+} elseif (-not [string]::IsNullOrWhiteSpace([string]$Route)) {
+    $resolvedRoute = $Route
+    $routeSource = "param"
+} elseif (-not [string]::IsNullOrWhiteSpace($env:QRS_PIPELINE_ROUTE)) {
+    $resolvedRoute = $env:QRS_PIPELINE_ROUTE
+    $routeSource = "env"
+} else {
+    $resolvedRoute = "new"
+}
 $bfText = if ($env:QRS_LEGACY_BACKFILL -and $env:QRS_LEGACY_BACKFILL -ne "0") { "on" } else { "off" }
 $dfText = if ($DisableLegacyEquityFallback) { "on" } else { "off" }
-Write-Host ("[one-click-full] route={0} legacy_backfill={1} DisableLegacyEquityFallback={2}" -f $resolvedRoute, $bfText, $dfText)
+Write-Host ("[one-click-full] route={0} legacy_backfill={1} DisableLegacyEquityFallback={2} route_source={3}" -f $resolvedRoute, $bfText, $dfText, $routeSource)
 if (-not (Test-Path -LiteralPath $InputCsv)) {
     Write-Error ("Input CSV not found: {0}" -f $InputCsv)
 }
@@ -43,8 +57,11 @@ function Fail-Step([string]$Step, [string]$Info) {
 # 1) engine compare
 $compareArgs = @(
     "-ExecutionPolicy", "Bypass", "-File", "scripts\run_qrs.ps1",
-    "-Mode", "compare", "-Route", $resolvedRoute, "-InputCsv", $InputCsv, "-OutRoot", $root
+    "-Mode", "compare", "-InputCsv", $InputCsv, "-OutRoot", $root
 )
+if ($routeSource -eq "param") {
+    $compareArgs += @("-Route", $resolvedRoute)
+}
 if ($DisableLegacyEquityFallback) {
     $compareArgs += "-DisableLegacyEquityFallback"
 }
@@ -67,6 +84,9 @@ $rollArgs = @(
     "-ExecutionPolicy", "Bypass", "-File", "scripts\one_click_rolling_compare.ps1",
     "-InputCsv", $InputCsv, "-OutRoot", $rollRoot
 )
+if ($routeSource -eq "param") {
+    $rollArgs += @("-Route", $resolvedRoute)
+}
 if ($DisableLegacyEquityFallback) {
     $rollArgs += "-DisableLegacyEquityFallback"
 }
