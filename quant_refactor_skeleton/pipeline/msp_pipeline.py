@@ -88,6 +88,11 @@ def _file_sha256(path: Path) -> str | None:
 def _csv_rows(path: Path) -> int | None:
     if not path.exists() or not path.is_file():
         return None
+    try:
+        if path.stat().st_size == 0:
+            return 0
+    except Exception:
+        pass
     with path.open("rb") as f:
         count = 0
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
