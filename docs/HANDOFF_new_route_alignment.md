@@ -157,3 +157,60 @@ Common issues:
 
 Note:
 - Full regression is executed on the user machine and writes logs to `out_root` for traceability.
+
+## Deliverable: Copy/Paste Validation (5 minutes)
+```powershell
+# 1) First machine only (env setup)
+powershell -ExecutionPolicy Bypass -File scripts\setup_env.ps1
+
+# 2) New engine smoke (quick)
+powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode engine -Route new -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\deliverable_smoke
+
+# 3) Full regression (no-fallback)
+powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -DisableLegacyEquityFallback
+
+# 4) Full regression (legacy)
+powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -Route legacy
+```
+
+Pass criteria:
+- `FULL_REGRESSION=PASS`
+- engine compare `rows_over_threshold=0`
+- rolling compare `overall=PASS`
+
+## Latest Validation Evidence (paste)
+New engine smoke (run_qrs.ps1):
+```
+[QRS:new] pipeline=msp out_dir=C:\Users\54387\HMM-RF\outputs_rebuild\n15_smoke_engine\20260220_232336\engine\new
+[QRS:new] features_5m rows=103008 cols=26
+[QRS:new] super_state rows=7684 cols=29
+[QRS:new] rf_inputs rows=7684 cols=28
+run_report=C:\Users\54387\HMM-RF\outputs_rebuild\n15_smoke_engine\20260220_232336\engine\new\run_report.json
+```
+
+Full regression (no-fallback) key lines:
+```
+saved: outputs_rebuild\n15_4_final\20260220_211809\compare\regression_diff.csv
+rows_compared=348
+max_abs_diff=0.0
+max_rel_diff=0.0
+rows_over_threshold=0
+[QRS] compare=PASS
+```
+Note: `FULL_REGRESSION=PASS` was not captured here due to long rolling runtime; run locally using the Copy/Paste block above to obtain it.
+
+Full regression (legacy route) key lines:
+```
+saved: outputs_rebuild\n15_4_final\20260220_213402\compare\regression_diff.csv
+rows_compared=348
+max_abs_diff=0.0
+max_rel_diff=0.0
+rows_over_threshold=0
+[QRS] compare=PASS
+```
+
+Legacy scripts diff evidence:
+```
+git diff -- msp_engine_ewma_exhaustion_opt_atr_momo.py rolling_runner.py
+# output: empty
+```
