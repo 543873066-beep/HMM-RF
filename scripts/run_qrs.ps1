@@ -186,6 +186,42 @@ function Get-LegacyRollingContext {
     return $ctx
 }
 
+
+function Update-RunReport {
+    param(
+        [Parameter(Mandatory = $true)][string]$ReportPath,
+        [Parameter(Mandatory = $true)][string]$CompareStatus,
+        [double]$MaxAbs = 0,
+        [double]$MaxRel = 0,
+        [int]$RowsOver = 0,
+        [string]$DiffCsv = "",
+        [string]$RollingStatus = ""
+    )
+    if (-not (Test-Path -LiteralPath $ReportPath)) { return }
+    try {
+        $json = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
+    } catch { return }
+    $json.compare.status = $CompareStatus
+    if ($DiffCsv) { $json.compare.diff_csv = $DiffCsv }
+    $json.compare.max_abs = $MaxAbs
+    $json.compare.max_rel = $MaxRel
+    $json.compare.rows_over_threshold = $RowsOver
+    if ($RollingStatus) { $json.rolling_compare.status = $RollingStatus }
+    $json | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ReportPath -Encoding UTF8
+}
+
+function Get-CompareSummary {
+    param([Parameter(Mandatory = $true)][string]$DiffCsv)
+    if (-not (Test-Path -LiteralPath $DiffCsv)) { return $null }
+    try {
+        $rows = Import-Csv -LiteralPath $DiffCsv
+        if ($rows.Count -eq 0) { return @{ max_abs = 0; max_rel = 0; rows_over = 0 } }
+        $maxAbs = ($rows | Measure-Object -Property abs_diff -Maximum).Maximum
+        $maxRel = ($rows | Measure-Object -Property rel_diff -Maximum).Maximum
+        $rowsOver = ($rows | Where-Object { [double]$_.abs_diff -gt 0 }).Count
+        return @{ max_abs = [double]$maxAbs; max_rel = [double]$maxRel; rows_over = [int]$rowsOver }
+    } catch { return $null }
+}
 function Get-LatestCompareRun([string]$RootDir) {
     if (-not (Test-Path -LiteralPath $RootDir)) { return $null }
     return Get-ChildItem -LiteralPath $RootDir -Directory |
@@ -231,6 +267,8 @@ try {
             }
             if ($rc -ne 0) { exit $rc }
             Write-Host ("[QRS] mode=engine route={0} out_dir={1}" -f $Route, (Resolve-Path $outDir).Path)
+            $reportPath = Join-Path $outDir "run_report.json"
+            if (Test-Path -LiteralPath $reportPath) { Write-Host ("run_report={0}" -f (Resolve-Path $reportPath).Path) }
             exit 0
         }
         "rolling" {
@@ -315,6 +353,12 @@ try {
                 "--out", $diffPath
             )
             if ($rcCmp -eq 0) { Write-Host "[QRS] compare=PASS" } else { Write-Host "[QRS] compare=FAIL" }
+            $summary = Get-CompareSummary $diffPath
+            if ($summary -ne $null) {
+                Update-RunReport -ReportPath (Join-Path $newDir "run_report.json") -CompareStatus ($(if ($rcCmp -eq 0) { "PASS" } else { "FAIL" })) -MaxAbs $summary.max_abs -MaxRel $summary.max_rel -RowsOver $summary.rows_over -DiffCsv $diffPath
+            } else {
+                Update-RunReport -ReportPath (Join-Path $newDir "run_report.json") -CompareStatus ($(if ($rcCmp -eq 0) { "PASS" } else { "FAIL" })) -DiffCsv $diffPath
+            }
             Write-Host ("[QRS] legacy_equity={0}" -f $oldEq)
             Write-Host ("[QRS] new_equity={0}" -f $newEq)
             Write-Host ("[QRS] diff_csv={0}" -f $diffPath)

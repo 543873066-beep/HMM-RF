@@ -95,5 +95,13 @@ if ($LASTEXITCODE -ne 0) {
     Fail-Step "ROLLING_COMPARE" ("rolling_root=" + $rollRoot)
 }
 
+# update run_report with rolling status
+$reportPath = Join-Path (Join-Path $root "new") "run_report.json"
+if (Test-Path -LiteralPath $reportPath) {
+    $json = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+    $json.rolling_compare.status = "PASS"
+    $json | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $reportPath -Encoding UTF8
+}
+
 Write-Host "FULL_REGRESSION=PASS"
 exit 0

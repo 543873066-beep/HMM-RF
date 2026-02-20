@@ -117,6 +117,76 @@ def _write_manifest(out_dir: Path, manifest: dict) -> None:
     out_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
+def _git_head_sha() -> str | None:
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _file_size(path: Path) -> int | None:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        return int(path.stat().st_size)
+    except Exception:
+        return None
+
+
+def _time_range_from_index(df: pd.DataFrame) -> tuple[str | None, str | None]:
+    if df is None or len(df) == 0:
+        return None, None
+    return str(df.index.min()), str(df.index.max())
+
+
+def _csv_time_range(path: Path) -> tuple[str | None, str | None]:
+    if not path.exists() or not path.is_file():
+        return None, None
+    try:
+        df = pd.read_csv(path, usecols=["time"])
+        df["time"] = pd.to_datetime(df["time"], errors="coerce")
+        df = df.dropna(subset=["time"])
+        if df.empty:
+            return None, None
+        return str(df["time"].min()), str(df["time"].max())
+    except Exception:
+        return None, None
+
+
+def _artifact_entry(name: str, path: Path, df: pd.DataFrame | None = None) -> dict:
+    time_min = None
+    time_max = None
+    if df is not None and len(df) > 0:
+        time_min, time_max = _time_range_from_index(df)
+    else:
+        time_min, time_max = _csv_time_range(path)
+    return {
+        "name": name,
+        "path": str(path),
+        "exists": path.exists(),
+        "sha256": _file_sha256(path),
+        "rows": _csv_rows(path),
+        "time_min": time_min,
+        "time_max": time_max,
+    }
+
+
+def _write_report(out_dir: Path, report: dict) -> None:
+    out_path = out_dir / "run_report.json"
+    out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+
 def _digest_df_edges(df: pd.DataFrame, cols: list[str], n: int = 64) -> str:
     if df is None or len(df) == 0:
         return "empty"
@@ -283,6 +353,36 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
 
     stage = "init"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    report: dict = {
+        "meta": {
+            "timestamp": timestamp,
+            "git_head": _git_head_sha(),
+            "route": "new",
+            "legacy_backfill": None,
+            "disable_legacy_equity_fallback": None,
+        },
+        "inputs": {
+            "input_csv": None,
+            "file_size": None,
+            "sha256": None,
+            "rows": None,
+            "time_min": None,
+            "time_max": None,
+        },
+        "config": {},
+        "artifacts": {},
+        "compare": {
+            "status": None,
+            "max_abs": None,
+            "max_rel": None,
+            "rows_over_threshold": None,
+            "diff_csv": None,
+        },
+        "rolling_compare": {
+            "status": None,
+        },
+        "error": None,
+    }
     manifest: dict = {
         "route": "new",
         "timestamp": timestamp,
@@ -301,6 +401,8 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     if not input_csv:
         manifest["error"] = "missing_input_csv"
         _write_manifest(Path(str(args.out_dir or "outputs")), manifest)
+        report["error"] = "missing_input_csv"
+        _write_report(Path(str(args.out_dir or "outputs")), report)
         print("[QRS:new] error: --input_csv is required")
         return 2
 
@@ -309,6 +411,9 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         manifest["input_csv"] = str(input_path.resolve())
         manifest["error"] = "input_csv_not_found"
         _write_manifest(Path(str(args.out_dir or "outputs")), manifest)
+        report["inputs"]["input_csv"] = str(input_path.resolve())
+        report["error"] = "input_csv_not_found"
+        _write_report(Path(str(args.out_dir or "outputs")), report)
         print(f"[QRS:new] error: input_csv does not exist: {input_path}")
         return 2
 
@@ -322,6 +427,10 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     manifest["input_csv_rows"] = _csv_rows(input_path)
     manifest["out_dir"] = str(out_dir.resolve())
     manifest["run_id"] = run_id
+    report["inputs"]["input_csv"] = str(input_path.resolve())
+    report["inputs"]["file_size"] = _file_size(input_path)
+    report["inputs"]["sha256"] = _file_sha256(input_path)
+    report["inputs"]["rows"] = _csv_rows(input_path)
     manifest["config"] = {
         "rs_5m": args.rs_5m,
         "rs_30m": args.rs_30m,
@@ -338,11 +447,16 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         "export_live_pack": args.export_live_pack,
         "live_pack_dir": args.live_pack_dir,
     }
+    report["config"] = dict(manifest["config"])
 
     print(f"[QRS:new] pipeline=msp input_csv={input_path}")
     print(f"[QRS:new] pipeline=msp out_dir={out_dir.resolve()}")
     print(f"[QRS:new] pipeline=msp run_id={run_id}")
     legacy_backfill_on = _is_legacy_backfill_enabled(cfg)
+    report["meta"]["legacy_backfill"] = bool(legacy_backfill_on)
+    report["meta"]["disable_legacy_equity_fallback"] = bool(
+        getattr(cfg, "disable_legacy_equity_fallback_in_rolling", False)
+    )
     if legacy_backfill_on:
         print("[QRS:new] legacy_backfill=on (diagnostic mode)")
     else:
@@ -354,6 +468,9 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     df_5m = data_loaders.normalize_input_5m(df_raw, cfg)
     df_30m = data_resample.resample_ohlcv(df_5m, "30min", cfg)
     df_1d = data_resample.resample_ohlcv(df_5m, "1D", cfg)
+    tmin, tmax = _time_range_from_index(df_5m)
+    report["inputs"]["time_min"] = tmin
+    report["inputs"]["time_max"] = tmax
 
     stage = "features.make_features"
     manifest["stage"] = stage
@@ -365,6 +482,11 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         manifest["error"] = "features_empty"
         manifest["artifacts"] = _manifest_artifacts(out_dir)
         _write_manifest(out_dir, manifest)
+        report["error"] = "features_empty"
+        report["artifacts"] = {
+            "features_5m": _artifact_entry("features_5m", out_dir / "features_5m.csv", feat_5m),
+        }
+        _write_report(out_dir, report)
         print("[QRS:new] error: feature table is empty after make_features")
         return 4
 
@@ -378,6 +500,11 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         manifest["error"] = f"missing_core_features:{missing}"
         manifest["artifacts"] = _manifest_artifacts(out_dir)
         _write_manifest(out_dir, manifest)
+        report["error"] = f"missing_core_features:{missing}"
+        report["artifacts"] = {
+            "features_5m": _artifact_entry("features_5m", out_dir / "features_5m.csv", feat_5m),
+        }
+        _write_report(out_dir, report)
         print(f"[QRS:new] error: missing core feature columns: {missing}")
         return 5
 
@@ -389,6 +516,11 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         manifest["error"] = "overlay_super_state_empty"
         manifest["artifacts"] = _manifest_artifacts(out_dir)
         _write_manifest(out_dir, manifest)
+        report["error"] = "overlay_super_state_empty"
+        report["artifacts"] = {
+            "features_5m": _artifact_entry("features_5m", out_dir / "features_5m.csv", feat_5m),
+        }
+        _write_report(out_dir, report)
         print("[QRS:new] error: overlay/super_state table is empty")
         return 6
     required_super_cols = [
@@ -405,6 +537,12 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         manifest["error"] = f"missing_super_state_columns:{missing_super}"
         manifest["artifacts"] = _manifest_artifacts(out_dir)
         _write_manifest(out_dir, manifest)
+        report["error"] = f"missing_super_state_columns:{missing_super}"
+        report["artifacts"] = {
+            "features_5m": _artifact_entry("features_5m", out_dir / "features_5m.csv", feat_5m),
+            "super_state": _artifact_entry("super_state", out_dir / "super_state.csv", overlay_super_df),
+        }
+        _write_report(out_dir, report)
         print(f"[QRS:new] error: missing super_state columns: {missing_super}")
         return 7
     overlay_super_df = _apply_super_export_domain(overlay_super_df, cfg)
@@ -439,6 +577,13 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         manifest["error"] = f"rf_pipeline_error:{rc_rf}"
         manifest["artifacts"] = _manifest_artifacts(out_dir)
         _write_manifest(out_dir, manifest)
+        report["error"] = f"rf_pipeline_error:{rc_rf}"
+        report["artifacts"] = {
+            "features_5m": _artifact_entry("features_5m", out_dir / "features_5m.csv", feat_5m),
+            "super_state": _artifact_entry("super_state", out_dir / "super_state.csv", overlay_super_df),
+            "rf_inputs": _artifact_entry("rf_inputs", out_dir / "rf_inputs.csv", rf_inputs),
+        }
+        _write_report(out_dir, report)
         print(f"[QRS:new] error: rf pipeline returned {rc_rf}")
         return rc_rf
 
@@ -462,6 +607,16 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
 
     manifest["artifacts"] = _manifest_artifacts(out_dir)
     _write_manifest(out_dir, manifest)
+    report["artifacts"] = {
+        "features_5m": _artifact_entry("features_5m", out_dir / "features_5m.csv", feat_5m),
+        "super_state": _artifact_entry("super_state", out_dir / "super_state.csv", overlay_super_df),
+        "rf_inputs": _artifact_entry("rf_inputs", out_dir / "rf_inputs.csv", rf_inputs),
+        "equity": _artifact_entry(
+            "equity",
+            out_dir / "rf_h4_per_state_dynamic_selected" / "backtest_equity_curve.csv",
+        ),
+    }
+    _write_report(out_dir, report)
     print("[QRS:new] N4 pipeline finished")
     return 0
 
