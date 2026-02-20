@@ -8,6 +8,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Sequence
+import platform
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -120,8 +122,6 @@ def _write_manifest(out_dir: Path, manifest: dict) -> None:
 
 def _git_head_sha() -> str | None:
     try:
-        import subprocess
-
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             check=False,
@@ -132,6 +132,22 @@ def _git_head_sha() -> str | None:
         if result.returncode != 0:
             return None
         return result.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _git_is_dirty() -> bool | None:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+        return bool(result.stdout.strip())
     except Exception:
         return None
 
@@ -186,6 +202,24 @@ def _artifact_entry(name: str, path: Path, df: pd.DataFrame | None = None) -> di
 def _write_report(out_dir: Path, report: dict) -> None:
     out_path = out_dir / "run_report.json"
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+
+def _write_pip_freeze(log_path: Path) -> tuple[str | None, str | None]:
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "freeze"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None, None
+        log_path.write_text(result.stdout, encoding="utf-8")
+        return str(log_path), _file_sha256(log_path)
+    except Exception:
+        return None, None
 
 
 class _FilteredStream:
@@ -404,6 +438,11 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
         "meta": {
             "timestamp": timestamp,
             "git_head": _git_head_sha(),
+            "git_dirty": None,
+            "python_version": None,
+            "platform": None,
+            "pip_freeze_path": None,
+            "pip_freeze_sha256": None,
             "route": "new",
             "legacy_backfill": None,
             "disable_legacy_equity_fallback": None,
@@ -507,6 +546,12 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     if os.getenv("QRS_VERBOSE_WARNINGS", "").strip().lower() not in {"1", "true", "yes", "y", "on"}:
         sys.stdout = _FilteredStream(sys.stdout, hmm_log)
         sys.stderr = _FilteredStream(sys.stderr, hmm_log)
+    report["meta"]["git_dirty"] = _git_is_dirty()
+    report["meta"]["python_version"] = sys.version
+    report["meta"]["platform"] = platform.platform()
+    pip_path, pip_sha = _write_pip_freeze(out_dir / "logs" / "pip_freeze.txt")
+    report["meta"]["pip_freeze_path"] = pip_path
+    report["meta"]["pip_freeze_sha256"] = pip_sha
     legacy_backfill_on = _is_legacy_backfill_enabled(cfg)
     report["meta"]["legacy_backfill"] = bool(legacy_backfill_on)
     report["meta"]["disable_legacy_equity_fallback"] = bool(
