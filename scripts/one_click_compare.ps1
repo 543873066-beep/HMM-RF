@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$InputCsv = "data\sh000852_5m.csv",
-    [string]$OutRoot = "outputs_rebuild\final_compare",
+    [string]$OutRoot = "outputs_rebuild\compare",
     [ValidateSet("legacy", "new")]
     [AllowNull()]
     [AllowEmptyString()]

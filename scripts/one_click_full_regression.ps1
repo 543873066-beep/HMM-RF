@@ -79,7 +79,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 3) rolling compare
-$rollRoot = Join-Path $root "rolling"
+$rollRoot = $root
 $rollArgs = @(
     "-ExecutionPolicy", "Bypass", "-File", "scripts\one_click_rolling_compare.ps1",
     "-InputCsv", $InputCsv, "-OutRoot", $rollRoot

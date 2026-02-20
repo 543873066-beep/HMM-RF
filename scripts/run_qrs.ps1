@@ -224,10 +224,16 @@ function Get-CompareSummary {
 }
 function Get-LatestCompareRun([string]$RootDir) {
     if (-not (Test-Path -LiteralPath $RootDir)) { return $null }
-    return Get-ChildItem -LiteralPath $RootDir -Directory |
+    $direct = Get-ChildItem -LiteralPath $RootDir -Directory |
         Where-Object { (Test-Path (Join-Path $_.FullName "legacy")) -and (Test-Path (Join-Path $_.FullName "new")) } |
         Sort-Object Name -Descending |
         Select-Object -First 1
+    if ($null -ne $direct) { return $direct }
+    $nested = Get-ChildItem -LiteralPath $RootDir -Recurse -Directory |
+        Where-Object { (Test-Path (Join-Path $_.FullName "legacy")) -and (Test-Path (Join-Path $_.FullName "new")) } |
+        Sort-Object FullName -Descending |
+        Select-Object -First 1
+    return $nested
 }
 
 if ($Help) {
@@ -241,7 +247,12 @@ $Route = $resolved.Route
 $RouteSource = $resolved.Source
 $runRoot = $null
 if ($Mode -ne "stage-diff") {
-    $runRoot = Join-Path $OutRoot $timestamp
+    $leaf = Split-Path -Path $OutRoot -Leaf
+    if ($leaf -match '^\d{8}_\d{6}$') {
+        $runRoot = Join-Path $OutRoot $Mode
+    } else {
+        $runRoot = Join-Path (Join-Path $OutRoot $timestamp) $Mode
+    }
     New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
 }
 
