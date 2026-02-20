@@ -16,25 +16,20 @@
   - same feature set/order
   - same train/trade split
   - same gate/backtest rules
+## 推荐用法（默认 new）
+- 默认已经是 new route（不传 -Route 时即为 new）。
+- 一键全回归（强制 no-fallback）：
+  - `powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\full_regression -DisableLegacyEquityFallback`
 
+## legacy 回退命令
+- Engine 走 legacy：
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode engine -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\legacy_run`
+- Rolling 走 legacy：
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_qrs.ps1 -Mode rolling -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\legacy_rolling`
 
-
-## ??????? new?
-- ????? new route??? -Route ??? new??
-- ???????? no-fallback??
-  - `powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuildull_regression -DisableLegacyEquityFallback`
-
-## legacy ????
-- Engine ? legacy?
-  - `powershell -ExecutionPolicy Bypass -File scripts
-un_qrs.ps1 -Mode engine -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\legacy_run`
-- Rolling ? legacy?
-  - `powershell -ExecutionPolicy Bypass -File scripts
-un_qrs.ps1 -Mode rolling -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\legacy_rolling`
-
-## ??????no-fallback?
-- ? compare/rolling/full regression ???`-DisableLegacyEquityFallback`
-- ????????? legacy equity ???
+## 强制无兜底（no-fallback）
+- 在 compare/rolling/full regression 中加：`-DisableLegacyEquityFallback`
+- 用于确保结果不依赖 legacy equity 兜底。
 
 ## Routes and defaults
 - `legacy` route: runs the original scripts unchanged (`msp_engine_ewma_exhaustion_opt_atr_momo.py`, `rolling_runner.py`).
@@ -46,7 +41,7 @@ un_qrs.ps1 -Mode rolling -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot o
 ## One-click full regression (no-fallback)
 Recommended (PowerShell):
 
-`powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuildull_regression -DisableLegacyEquityFallback`
+`powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\full_regression -DisableLegacyEquityFallback`
 
 What it does:
 - engine compare (legacy vs new)
@@ -69,21 +64,29 @@ PASS criteria:
   - if you see garbled output, set `PYTHONUTF8=1` before running or use the wrapper (no legacy edits)
 
 
-## Troubleshooting ???
+## Troubleshooting 决策树
 1) full regression FAIL
-- ?? `run_report.json` ? `compare` ???status/max_abs/rows_over/diff_csv??
+- 先看 `run_report.json` 的 `compare` 字段（status/max_abs/rows_over/diff_csv）。
 
 2) engine compare FAIL
-- ?? stage-diff?features/super_state/rf_inputs??
-- ?? `run_report.json` ? inputs/time_range ? config? 
+- 先跑 stage-diff（features/super_state/rf_inputs）。
+- 再看 `run_report.json` 的 inputs/time_range 与 config。 
 
 3) rolling FAIL
-- ? `rolling_diff_by_fold.csv` ? `rolling_diff_summary.json`?
-- ??? `fold_inputs_summary.json`????? fold ????? 
+- 看 `rolling_diff_by_fold.csv` 与 `rolling_diff_summary.json`。
+- 如果有 `fold_inputs_summary.json`，优先对齐 fold 输入摘要。 
 
-4) ?????PATH_OUT_OF_ROOT / LOW_COVERAGE / ZERO_ROWS_COMPARED?
-- ?????????????????
-- ????????? out_root ??? compare/rolling???? run_report.json ? inputs/time_range ???
+4) 护栏触发（PATH_OUT_OF_ROOT / LOW_COVERAGE / ZERO_ROWS_COMPARED）
+- 说明：输出目录结构或时间域不一致。
+- 修复：用相同输入与 out_root 重新跑 compare/rolling，并确认 run_report.json 的 inputs/time_range 一致。
+
+## 第一次在新机器上安装/验证
+1) 安装依赖与创建 venv：
+   - `powershell -ExecutionPolicy Bypass -File scripts\setup_env.ps1`
+2) 运行一次全回归（no-fallback）：
+   - `powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -DisableLegacyEquityFallback`
+3) 看到 `FULL_REGRESSION=PASS` 即完成验证。
+4) 若需要 legacy 回退，显式加 `-Route legacy`。
 
 ## Output layout (full regression)
 - `out_root/<timestamp>/legacy/...`
@@ -92,7 +95,7 @@ PASS criteria:
   - `regression_diff.csv` (engine compare)
   - `rolling_diff_by_fold.csv` and `rolling_diff_summary.json` (rolling compare)
 - Reproducibility:
-  - `run_manifest.json` is written under each new-route out_dir and includes input hash/config/artifacts.
+  - `run_report.json` is written under each new-route out_dir and includes input hash/config/artifacts.
 
 ## Validation commands
 - Stage-level diff:
