@@ -120,3 +120,40 @@ PASS criteria:
   - put CSV in `data\` with `time/open/high/low/close/volume`, or pass `-InputCsv`.
 - Fold mismatch in rolling compare:
   - ensure both roots come from runs on the same input/config and check `rolling_diff_summary.json`.
+
+## N15-4 Final Acceptance (this machine)
+Commands:
+- `powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -DisableLegacyEquityFallback -OutRoot outputs_rebuild\n15_4_final`
+- `powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -Route legacy -OutRoot outputs_rebuild\n15_4_final`
+
+Logs:
+- `outputs_rebuild\n15_4_final\full_regression_new.log` (contains compare PASS + stage-diff)
+- `outputs_rebuild\n15_4_final\full_regression_legacy.log` (contains compare PASS + stage-diff)
+
+Key artifacts (new compare run):
+- `outputs_rebuild\n15_4_final\20260220_211809\compare\new\run_report.json`
+- `outputs_rebuild\n15_4_final\20260220_211809\compare\new\run_manifest.json`
+- `outputs_rebuild\n15_4_final\20260220_211809\compare\regression_diff.csv`
+
+## Release Checklist
+Install and sanity:
+1) Setup env (first machine only):
+   - `powershell -ExecutionPolicy Bypass -File scripts\setup_env.ps1`
+2) Run full regression (local machine):
+   - `powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -DisableLegacyEquityFallback`
+   - `powershell -ExecutionPolicy Bypass -File scripts\one_click_full_regression.ps1 -Route legacy`
+
+Pass criteria:
+- `FULL_REGRESSION=PASS`
+- engine compare PASS (rows_over_threshold=0)
+- rolling compare PASS (overall=PASS)
+- legacy scripts diff empty:
+  - `git diff -- msp_engine_ewma_exhaustion_opt_atr_momo.py rolling_runner.py`
+
+Common issues:
+- PowerShell encoding: set `PYTHONUTF8=1` if output is garbled.
+- Paths/permissions: ensure `data\sh000852_5m.csv` exists or pass `-InputCsv`.
+- Long runs: full regression can take >10 minutes, logs are written under `out_root`.
+
+Note:
+- Full regression is executed on the user machine and writes logs to `out_root` for traceability.
