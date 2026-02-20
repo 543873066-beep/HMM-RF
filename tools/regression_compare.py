@@ -56,6 +56,11 @@ def _print_diagnostics(diff_df: pd.DataFrame, tol_abs: float, tol_rel: float, to
     print(f"rows_over_threshold={len(bad)}")
 
     if len(bad) > 0:
+        likely = "domain_mismatch"
+        if max_abs == 0 and max_rel == 0:
+            likely = "missing_equity"
+        print(f"LIKELY_CAUSE={likely}")
+        print("NEXT_ACTION=run stage-diff and inspect run_report.json compare fields")
         show = bad.sort_values("abs_diff", ascending=False).head(int(max(1, topn)))
         print("top_diff_rows:")
         cols = ["time", "equity_old", "equity_new", "abs_diff", "rel_diff"]

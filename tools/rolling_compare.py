@@ -288,6 +288,9 @@ def run_compare(
     print(f"[rolling-compare] by_fold_csv={by_fold_csv}")
     print(f"[rolling-compare] summary={summary_path}")
     print(f"[rolling-compare] overall={'PASS' if overall_pass else 'FAIL'}")
+    if not overall_pass:
+        print("LIKELY_CAUSE=fold_mismatch_or_low_coverage")
+        print("NEXT_ACTION=check rolling_diff_by_fold.csv and fold_inputs_summary.json")
     return 0 if overall_pass else 2
 
 

@@ -120,6 +120,19 @@ def main() -> int:
         print(f"  legacy_time_range={t_old_min} -> {t_old_max}")
         print(f"  new_time_range={t_new_min} -> {t_new_max}")
 
+    ok = True
+    if len(legacy_features) != len(new_features):
+        ok = False
+    if legacy_super.empty or len(legacy_super) != len(new_super):
+        ok = False
+    if len(legacy_rf_inputs) != len(new_rf_inputs):
+        ok = False
+
+    if not ok:
+        print("LIKELY_CAUSE=feature_or_domain_mismatch")
+        print("NEXT_ACTION=check run_report.json inputs/time_range and compare feature columns")
+        return 2
+
     return 0
 
 
