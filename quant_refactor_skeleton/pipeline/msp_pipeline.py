@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Sequence
@@ -187,6 +188,29 @@ def _write_report(out_dir: Path, report: dict) -> None:
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
 
+class _FilteredStream:
+    def __init__(self, stream, log_path: Path):
+        self._stream = stream
+        self._log_path = log_path
+
+    def write(self, data):
+        try:
+            if "not converging" in str(data).lower():
+                try:
+                    self._log_path.parent.mkdir(parents=True, exist_ok=True)
+                    with self._log_path.open("a", encoding="utf-8") as f:
+                        f.write(str(data).strip() + "\n")
+                except Exception:
+                    pass
+                return len(str(data))
+        except Exception:
+            pass
+        return self._stream.write(data)
+
+    def flush(self):
+        return self._stream.flush()
+
+
 def _digest_df_edges(df: pd.DataFrame, cols: list[str], n: int = 64) -> str:
     if df is None or len(df) == 0:
         return "empty"
@@ -309,7 +333,30 @@ def _compute_legacy_super_state_in_memory(input_csv: str):
     legacy_cfg.input_csv = str(input_csv)
     # avoid writing into active new-route output directory for alignment source
     legacy_cfg.out_dir = str(Path("outputs_rebuild") / "_tmp_legacy_super_mem")
-    df = legacy_mod.run_msp_pipeline(legacy_cfg)
+    verbose = os.getenv("QRS_VERBOSE_WARNINGS", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+    if verbose:
+        df = legacy_mod.run_msp_pipeline(legacy_cfg)
+    else:
+        import io
+        import contextlib
+
+        buf_out = io.StringIO()
+        buf_err = io.StringIO()
+        with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
+            df = legacy_mod.run_msp_pipeline(legacy_cfg)
+        lines = (buf_out.getvalue() + "\n" + buf_err.getvalue()).splitlines()
+        warn_lines = [ln.strip() for ln in lines if "not converging" in ln.lower()]
+        if warn_lines:
+            log_path = os.getenv("QRS_HMM_WARN_LOG", "")
+            if log_path:
+                try:
+                    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+                    with Path(log_path).open("a", encoding="utf-8") as f:
+                        for ln in warn_lines:
+                            f.write(ln + "\n")
+                except Exception:
+                    pass
+            print(f"[WARN] HMM not converging (count={len(warn_lines)}). See {log_path or 'logs/hmm_warnings.txt'}")
     if df is None or len(df) == 0:
         return None
     out = df.copy()
@@ -452,6 +499,14 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     print(f"[QRS:new] pipeline=msp input_csv={input_path}")
     print(f"[QRS:new] pipeline=msp out_dir={out_dir.resolve()}")
     print(f"[QRS:new] pipeline=msp run_id={run_id}")
+    hmm_log = out_dir / "logs" / "hmm_warnings.txt"
+    hmm_log.parent.mkdir(parents=True, exist_ok=True)
+    if not hmm_log.exists():
+        hmm_log.write_text("", encoding="utf-8")
+    os.environ["QRS_HMM_WARN_LOG"] = str(hmm_log)
+    if os.getenv("QRS_VERBOSE_WARNINGS", "").strip().lower() not in {"1", "true", "yes", "y", "on"}:
+        sys.stdout = _FilteredStream(sys.stdout, hmm_log)
+        sys.stderr = _FilteredStream(sys.stderr, hmm_log)
     legacy_backfill_on = _is_legacy_backfill_enabled(cfg)
     report["meta"]["legacy_backfill"] = bool(legacy_backfill_on)
     report["meta"]["disable_legacy_equity_fallback"] = bool(
@@ -572,7 +627,30 @@ def run_msp_pipeline(argv: Optional[Sequence[str]] = None) -> int:
     print("[QRS:new] stage=rf.pipeline")
     from quant_refactor_skeleton.pipeline import rf_pipeline as rf_pipeline_mod
 
-    rc_rf = int(rf_pipeline_mod.run_rf_pipeline(rf_inputs, cfg, argv=list(_normalize_argv(argv))))
+    verbose = os.getenv("QRS_VERBOSE_WARNINGS", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+    if verbose:
+        rc_rf = int(rf_pipeline_mod.run_rf_pipeline(rf_inputs, cfg, argv=list(_normalize_argv(argv))))
+    else:
+        import io
+        import contextlib
+
+        buf_out = io.StringIO()
+        buf_err = io.StringIO()
+        with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
+            rc_rf = int(rf_pipeline_mod.run_rf_pipeline(rf_inputs, cfg, argv=list(_normalize_argv(argv))))
+        lines = (buf_out.getvalue() + "\n" + buf_err.getvalue()).splitlines()
+        warn_lines = [ln.strip() for ln in lines if "not converging" in ln.lower()]
+        if warn_lines:
+            log_path = os.getenv("QRS_HMM_WARN_LOG", "")
+            if log_path:
+                try:
+                    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+                    with Path(log_path).open("a", encoding="utf-8") as f:
+                        for ln in warn_lines:
+                            f.write(ln + "\n")
+                except Exception:
+                    pass
+            print(f"[WARN] HMM not converging (count={len(warn_lines)}). See {log_path or 'logs/hmm_warnings.txt'}")
     if rc_rf != 0:
         manifest["error"] = f"rf_pipeline_error:{rc_rf}"
         manifest["artifacts"] = _manifest_artifacts(out_dir)

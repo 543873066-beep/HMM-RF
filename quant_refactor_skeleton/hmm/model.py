@@ -4,6 +4,11 @@ import numpy as np
 import pandas as pd
 from hmmlearn.hmm import GaussianHMM
 from sklearn.preprocessing import StandardScaler
+import os
+import warnings
+from datetime import datetime
+import io
+import contextlib
 
 
 def get_hmm_fit_defaults(cfg=None):
@@ -34,6 +39,70 @@ def _force_random_init_hmm(model: GaussianHMM, X_fit_s: np.ndarray, seed: int, m
     model.means_ = means
     model.covars_ = covars
     model.init_params = ""
+
+
+_HMM_WARN_SUMMARY_PRINTED = False
+
+
+def _should_verbose_warnings() -> bool:
+    v = os.getenv("QRS_VERBOSE_WARNINGS", "").strip().lower()
+    return v in {"1", "true", "yes", "y", "on"}
+
+
+def _warn_log_path() -> str | None:
+    return os.getenv("QRS_HMM_WARN_LOG", "").strip() or None
+
+
+def _append_warn_log(messages: list[str]) -> None:
+    if not messages:
+        return
+    path = _warn_log_path()
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(path, "a", encoding="utf-8") as f:
+            for m in messages:
+                f.write(f"[{stamp}] {m}\n")
+    except Exception:
+        return
+
+
+def _run_with_warning_capture(fn):
+    global _HMM_WARN_SUMMARY_PRINTED
+    if _should_verbose_warnings():
+        return fn()
+    captured: list[str] = []
+
+    def _capture(message, category, filename, lineno, file=None, line=None):
+        captured.append(str(message))
+
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        old_show = warnings.showwarning
+        warnings.showwarning = _capture
+        try:
+            with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+                result = fn()
+        finally:
+            warnings.showwarning = old_show
+    extra = (stdout_buf.getvalue() + "\n" + stderr_buf.getvalue()).strip().splitlines()
+    for line in extra:
+        line = line.strip()
+        if not line:
+            continue
+        if "not converging" in line.lower():
+            captured.append(line)
+    if captured:
+        _append_warn_log(captured)
+        if not _HMM_WARN_SUMMARY_PRINTED:
+            _HMM_WARN_SUMMARY_PRINTED = True
+            path = _warn_log_path() or "logs/hmm_warnings.txt"
+            print(f"[WARN] HMM not converging (count={len(captured)}). See {path}")
+    return result
 
 
 def align_states_by_volatility(model, X_sample=None):
@@ -125,7 +194,7 @@ def fit_hmm_train_infer(
             )
             if force_random_init:
                 _force_random_init_hmm(model, X_fit_s, current_seed, min_covar=float(min_covar))
-            model.fit(X_fit_s)
+            _run_with_warning_capture(lambda: model.fit(X_fit_s))
         except ValueError:
             try:
                 model = GaussianHMM(
@@ -136,7 +205,7 @@ def fit_hmm_train_infer(
                     verbose=False,
                     min_covar=1e-2,
                 )
-                model.fit(X_fit_s)
+                _run_with_warning_capture(lambda: model.fit(X_fit_s))
             except Exception:
                 continue
 
@@ -153,7 +222,7 @@ def fit_hmm_train_infer(
             random_state=int(base_random_state),
             min_covar=0.1,
         )
-        best_model.fit(X_fit_s)
+        _run_with_warning_capture(lambda: best_model.fit(X_fit_s))
         best_ll = best_model.score(X_fit_s)
 
     # Align states for interpretability (low-vol -> low index, etc.)
