@@ -26,9 +26,11 @@
 
 ## legacy ????
 - Engine ? legacy?
-  - `powershell -ExecutionPolicy Bypass -File scriptsun_qrs.ps1 -Mode engine -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\legacy_run`
+  - `powershell -ExecutionPolicy Bypass -File scripts
+un_qrs.ps1 -Mode engine -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\legacy_run`
 - Rolling ? legacy?
-  - `powershell -ExecutionPolicy Bypass -File scriptsun_qrs.ps1 -Mode rolling -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\legacy_rolling`
+  - `powershell -ExecutionPolicy Bypass -File scripts
+un_qrs.ps1 -Mode rolling -Route legacy -InputCsv data\sh000852_5m.csv -OutRoot outputs_rebuild\legacy_rolling`
 
 ## ??????no-fallback?
 - ? compare/rolling/full regression ???`-DisableLegacyEquityFallback`
@@ -65,6 +67,23 @@ PASS criteria:
   - this is a training warning, not an automatic failure; only compare results decide PASS/FAIL
 - Windows encoding:
   - if you see garbled output, set `PYTHONUTF8=1` before running or use the wrapper (no legacy edits)
+
+
+## Troubleshooting ???
+1) full regression FAIL
+- ?? `run_report.json` ? `compare` ???status/max_abs/rows_over/diff_csv??
+
+2) engine compare FAIL
+- ?? stage-diff?features/super_state/rf_inputs??
+- ?? `run_report.json` ? inputs/time_range ? config? 
+
+3) rolling FAIL
+- ? `rolling_diff_by_fold.csv` ? `rolling_diff_summary.json`?
+- ??? `fold_inputs_summary.json`????? fold ????? 
+
+4) ?????PATH_OUT_OF_ROOT / LOW_COVERAGE / ZERO_ROWS_COMPARED?
+- ?????????????????
+- ????????? out_root ??? compare/rolling???? run_report.json ? inputs/time_range ???
 
 ## Output layout (full regression)
 - `out_root/<timestamp>/legacy/...`
